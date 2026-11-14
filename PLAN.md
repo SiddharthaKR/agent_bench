@@ -71,7 +71,8 @@ Milestone 0 is the go or no-go point. If Gemma 4 26B still fails on the server w
 - `src/tools/`: `read_file`, `write_file`, `replace_lines`, `compile`, `run_sim`.
 - `src/guard.ts`: loop guard. `src/trace.ts`: trace writer.
 - `src/agent.ts`: `runAgent`. `src/cli.ts`: command line.
-- `agents/fpga/`: the FPGA agent. `config.json`: model servers and compile commands.
+- `agents/fpga/`: the FPGA agent. `config.json`: model servers and compile commands. Temperature 0.2 is carried over from the old harness. `office-shim` points at the Gemma proxy on port 8088, as a fallback if LM Studio rejects plain chat.
+- `scripts/h_easy.sh` and `tasks/h-easy.md`: the test against the old harness, described below.
 - `test/`: 115 tests, all passing on 2026-11-14.
 
 Tool-call format (no JSON, so the model never escapes code):
@@ -99,11 +100,28 @@ endmodule
 - Node drops a request after five minutes without a reply. Replies are now streamed.
 - A compile error now shows the offending source line.
 
+### One-command test against the old harness
+
+`scripts/h_easy.sh` runs track H easy of the old FPGA harness (`ai_demo`) with this agent and scores it with that harness's hidden judge:
+
+```bash
+bash scripts/h_easy.sh <path to ai_demo> office <LM Studio model id>
+```
+
+It asks the old harness for a fresh workspace (`run_demo.sh --setup-only`, which replaces its workspace folder), runs the agent on `tasks/h-easy.md`, runs the hidden judge, and checks that no hidden file leaked. The result lines are `JUDGE: PASS|FAIL` and `LEAK CHECK: clean`. The trace is written into the old harness's run folder under `agent_bench/`.
+
+The task differs from the opencode version in one way: this agent has no Python or synthesis tool yet, so it checks itself with a hand-computed self-checking testbench. The judge is the same.
+
+Dry run on the Windows PC with Gemma 4 E4B, 2026-11-14: the whole procedure worked; the agent used all 40 tool calls with 0 unreadable calls; the judge reported COMPILE_ERROR, so FAIL. Two weaknesses showed up, both for milestone 1:
+
+- The model repeated `replace_lines` on the same stale line range while the file kept growing. Different text each time, so the loop guard did not see a repeat.
+- The compile result was the same failure many times in a row. The guard should also notice a result that does not change.
+
 ### Still to do for milestone 0
 
-- [ ] Set the LM Studio model id for `office` in `config.json`.
-- [ ] Get the repository onto the server (first commit and a remote, or a folder copy).
-- [ ] Run task H easy three times on the server with Gemma 4 26B and score it with the existing hidden judges. Compare with opencode's 0 of 16.
+- [x] First commit.
+- [ ] Get the repository onto the server (a remote, or a single-file copy).
+- [ ] Run `scripts/h_easy.sh` three times on the server with Gemma 4 26B. Compare with opencode's 0 of 16.
 - [ ] Check on the server: which effort or thinking setting Gemma 4 accepts on LM Studio, and whether it handles parallel requests.
 
 ## Open points

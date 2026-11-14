@@ -2,15 +2,31 @@
 	"servers": {
 		"local": {
 			"baseUrl": "http://localhost:11434/v1",
-			"model": "gemma4-e4b-ctx32768:latest"
+			"model": "gemma4-e4b-ctx32768:latest",
+			"temperature": 0.2
 		},
 		"office": {
 			"baseUrl": "http://172.20.1.126:1234/v1",
-			"model": "SET-THE-LM-STUDIO-MODEL-ID"
+			"model": "SET-THE-LM-STUDIO-MODEL-ID",
+			"temperature": 0.2
+		},
+		"office-shim": {
+			"baseUrl": "http://127.0.0.1:8088/v1",
+			"model": "SET-THE-LM-STUDIO-MODEL-ID",
+			"temperature": 0.2
 		}
 	},
 	"commands": {
-		"compile": ["iverilog", "-g2012", "-o", "{out}", "{files}"],
-		"simulate": ["vvp", "{out}"]
+		"compile": [
+			"iverilog",
+			"-g2012",
+			"-o",
+			"{out}",
+			"{files}"
+		],
+		"simulate": [
+			"vvp",
+			"{out}"
+		]
 	}
 }
