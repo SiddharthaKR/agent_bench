@@ -1,0 +1,86 @@
+/**
+ * Command line: run one agent on one task in a project folder.
+ *
+ *   npm run agent -- --folder <project> --task "<what to do>"
+ *
+ * Options: --agent fpga | --server local | --model <id> | --task-file <path> | --runs <dir>
+ */
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { runAgent } from "./agent.ts";
+import type { ServerConfig } from "./model.ts";
+import type { CommandConfig } from "./types.ts";
+
+interface Config {
+	servers: Record<string, ServerConfig>;
+	commands: CommandConfig;
+}
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function parseArgs(argv: string[]): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i] ?? "";
+		if (!arg.startsWith("--")) throw new Error(`Unexpected argument "${arg}".`);
+		const value = argv[i + 1];
+		if (value === undefined || value.startsWith("--")) throw new Error(`Option ${arg} needs a value.`);
+		out[arg.slice(2)] = value;
+		i++;
+	}
+	return out;
+}
+
+async function main(): Promise<number> {
+	const args = parseArgs(process.argv.slice(2));
+	if (!args.folder) throw new Error("Give the project folder with --folder <path>.");
+	const task = args["task-file"] ? (await readFile(args["task-file"], "utf8")).trim() : args.task;
+	if (!task) throw new Error('Give the task with --task "<text>" or --task-file <path>.');
+
+	const config = JSON.parse(await readFile(path.join(ROOT, "config.json"), "utf8")) as Config;
+	const serverName = args.server ?? "local";
+	const server = config.servers[serverName];
+	if (!server) throw new Error(`No server named "${serverName}" in config.json. Known: ${Object.keys(config.servers).join(", ")}.`);
+	const chosen: ServerConfig = args.model ? { ...server, model: args.model } : server;
+	const agentName = args.agent ?? "fpga";
+
+	console.log(`Agent ${agentName} · model ${chosen.model} · ${chosen.baseUrl}`);
+	console.log(`Folder ${path.resolve(args.folder)}`);
+	console.log("");
+
+	const controller = new AbortController();
+	process.once("SIGINT", () => controller.abort());
+
+	const result = await runAgent({
+		agentDir: path.join(ROOT, "agents", agentName),
+		workspace: args.folder,
+		task,
+		server: chosen,
+		commands: config.commands,
+		runsDir: args.runs ?? path.join(ROOT, "runs"),
+		onStep: (line) => console.log(line),
+		signal: controller.signal,
+	});
+
+	console.log("");
+	if (result.finalText) console.log(result.finalText);
+	console.log("");
+	console.log(`Ended: ${result.reason}${result.error ? ` (${result.error})` : ""}`);
+	console.log(
+		`Model calls ${result.modelCalls} · tool calls ${result.toolCalls} · tool errors ${result.toolErrors} · unreadable calls ${result.invalidCalls} · blocked ${result.blocked}`,
+	);
+	console.log(
+		`Prompt ${result.promptChars} chars · context first ${result.firstPromptTokens} / last ${result.lastPromptTokens} tokens · output ${result.outputTokens} tokens · ${(result.ms / 1000).toFixed(1)} s`,
+	);
+	console.log(`Trace ${result.traceDir}`);
+	return result.reason === "done" ? 0 : 1;
+}
+
+main().then(
+	(code) => process.exit(code),
+	(error) => {
+		console.error((error as Error).message);
+		process.exit(2);
+	},
+);

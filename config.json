@@ -1,0 +1,16 @@
+{
+	"servers": {
+		"local": {
+			"baseUrl": "http://localhost:11434/v1",
+			"model": "gemma4-e4b-ctx32768:latest"
+		},
+		"office": {
+			"baseUrl": "http://172.20.1.126:1234/v1",
+			"model": "SET-THE-LM-STUDIO-MODEL-ID"
+		}
+	},
+	"commands": {
+		"compile": ["iverilog", "-g2012", "-o", "{out}", "{files}"],
+		"simulate": ["vvp", "{out}"]
+	}
+}
