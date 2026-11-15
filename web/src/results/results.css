@@ -1,0 +1,88 @@
+.results-lab-tab {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	border-left: 1px solid var(--line);
+	margin-left: 8px;
+	padding-left: 12px;
+}
+.results-screen {
+	height: 100%;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding: 20px;
+}
+.results-header {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 12px;
+}
+.results-header .field {
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+}
+.results-header select {
+	max-width: 260px;
+}
+.results-summaries {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 12px;
+}
+.results-summary {
+	padding: 16px;
+	min-width: 0;
+}
+.results-model {
+	overflow-wrap: anywhere;
+	margin-top: 4px;
+}
+.results-count {
+	font-size: 24px;
+	font-weight: 600;
+	margin: 16px 0 12px;
+}
+.results-rate {
+	height: 8px;
+	background: var(--pill);
+	border-radius: 4px;
+	overflow: hidden;
+}
+.results-rate > div {
+	height: 100%;
+	background: var(--acc);
+}
+.results-runs {
+	min-width: 0;
+}
+.results-runs h2 {
+	font-size: 16px;
+	margin: 16px;
+}
+.results-scroll {
+	overflow-x: auto;
+}
+.results-grid {
+	min-width: 1040px;
+}
+.results-row {
+	display: grid;
+	grid-template-columns: 180px 70px 80px minmax(140px, 1fr) minmax(160px, 1fr) 135px 90px 85px;
+	gap: 12px;
+	padding: 12px 16px;
+	border-top: 1px solid var(--line);
+}
+.results-row > div {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.results-columns {
+	background: var(--bg);
+}
+.results-no-match {
+	padding: 0 16px;
+}

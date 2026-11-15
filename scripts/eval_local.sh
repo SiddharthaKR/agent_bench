@@ -2,6 +2,7 @@
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root" || exit 2
+source "$root/scripts/scoring.sh"
 runs=1
 server=local
 model=""
@@ -18,6 +19,10 @@ while getopts ':n:s:m:w:t:' opt; do
 	esac
 done
 [[ "$runs" =~ ^[1-9][0-9]*$ && "$seconds" =~ ^[1-9][0-9]*$ ]] || { echo 'Runs and seconds must be positive integers.' >&2; exit 2; }
+record_model="$model"
+[[ -n "$record_model" ]] || record_model="$(configured_model)" || record_model=unknown
+setup=agent
+[[ -z "$workflow" ]] || setup="workflow $(basename "${workflow%.json}")"
 total_start=$SECONDS
 passed=0
 temp=""
@@ -26,16 +31,16 @@ for ((i=1; i<=runs; i++)); do
 	temp="$(mktemp -d)" || exit 2
 	cp -R evals/gain/. "$temp/" || exit 2
 	start=$SECONDS
-	args=(--folder "$temp" --server "$server" --max-seconds "$seconds")
+	args=(--folder "$(native "$temp")" --server "$server" --max-seconds "$seconds")
 	[[ -z "$model" ]] || args+=(--model "$model")
 	if [[ -n "$workflow" ]]; then
-		npx tsx src/cli-workflow.ts --workflow "$workflow" --task "$(cat evals/gain/task.md)" --no-pause --var design=rtl/gain.v --var tb=tb/tb_gain.v "${args[@]}" >"$temp/agent.log" 2>&1
+		npx tsx src/cli-workflow.ts --workflow "$(native "$workflow")" --task "$(cat evals/gain/task.md)" --no-pause --var design=rtl/gain.v --var tb=tb/tb_gain.v "${args[@]}" >"$temp/agent.log" 2>&1
 	else
 		npx tsx src/cli.ts --task-file evals/gain/task.md "${args[@]}" >"$temp/agent.log" 2>&1
 	fi
 	agent_code=$?
 	# Resolve configured command arrays in Node so paths with spaces remain single arguments.
-	node --input-type=module - "$root" "$temp" >"$temp/check.log" 2>&1 <<'NODE'
+	node --input-type=module - "$(native "$root")" "$(native "$temp")" >"$temp/check.log" 2>&1 <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -63,7 +68,12 @@ NODE
 		status=PASS
 		passed=$((passed + 1))
 	fi
-	echo "run $i: $status, $calls tool calls, $((SECONDS - start)) s"
+	elapsed=$((SECONDS - start))
+	echo "run $i: $status, $calls tool calls, $elapsed s"
+	trace="$(sed -n 's/^Trace //p' "$temp/agent.log" | tail -1 | tr -d '\r')"
+	metrics=()
+	[[ -z "$trace" ]] || metrics+=(--trace "$trace")
+	record_result --suite gain --level easy --server "$server" --model "$record_model" --setup "$setup" --verdict "$status" --tool-calls "$calls" --seconds "$elapsed" "${metrics[@]}"
 	rm -rf -- "$temp"
 	temp=""
 done

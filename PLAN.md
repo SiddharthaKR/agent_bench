@@ -60,7 +60,7 @@ Everything is customizable two ways: through the GUI, and through files and code
 | 3 | Workflows screen with the graph | Not started |
 | 4 | Trace: click-to-expand thinking in chat, plus the full Trace screen | Not started |
 | 5 | Agents screen, per-step settings, MCP servers, DPU agent | Not started |
-| 6 | Lab results, then the Linux install script for the team version | Not started |
+| 6 | Lab results, then development mode on the server (docs/server.md); no deployment for now | Not started |
 
 Milestone 0 is the go or no-go point. If Gemma 4 26B still fails on the server with clean tool calls, the problem is the model or the prompts and the rest of the plan changes.
 
@@ -111,6 +111,8 @@ bash scripts/h_easy.sh <path to ai_demo> office <LM Studio model id>
 It asks the old harness for a fresh workspace (`run_demo.sh --setup-only`, which replaces its workspace folder), runs the agent on `tasks/h-easy.md`, runs the hidden judge, and checks that no hidden file leaked. The result lines are `JUDGE: PASS|FAIL` and `LEAK CHECK: clean`. The trace is written into the old harness's run folder under `agent_bench/`.
 
 The task differs from the opencode version in one way: this agent has no Python or synthesis tool yet, so it checks itself with a hand-computed self-checking testbench. The judge is the same.
+
+The medium task uses `tasks/h-medium.md` to implement `red_pitaya_fir_block` from the FIR spec and bit-true Python model. Run `bash scripts/h_task.sh <path to ai_demo> medium office <model id>`; the same script accepts `easy`, `-n` repeats and `-t` seconds. Both levels record scores in `runs/results.jsonl` for the Lab Results screen.
 
 Dry run on the Windows PC with Gemma 4 E4B, 2026-11-14: the whole procedure worked; the agent used all 40 tool calls with 0 unreadable calls; the judge reported COMPILE_ERROR, so FAIL. Two weaknesses showed up, both for milestone 1:
 

@@ -10,6 +10,7 @@ import type {
 	Workflow,
 } from "../../src/shared/api.ts";
 import type { TraceDetail, TraceInfo } from "../../src/shared/trace.ts";
+import type { ResultRow } from "../../src/shared/results.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
 	const response = await fetch(url, {
@@ -25,6 +26,7 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 const q = (params: Record<string, string>) => new URLSearchParams(params).toString();
 
 export const api = {
+	results: () => call<ResultRow[]>("GET", "/api/results"),
 	agents: () => call<AgentDetail[]>("GET", "/api/agents"),
 	agent: (id: string) => call<AgentDetail>("GET", `/api/agents/${encodeURIComponent(id)}`),
 	createAgent: (id: string, name: string) => call<AgentDetail>("POST", "/api/agents", { id, name }),

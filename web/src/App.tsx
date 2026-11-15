@@ -5,6 +5,7 @@ import { api } from "./api.ts";
 import { WorkScreen } from "./work/WorkScreen.tsx";
 import { WorkflowsScreen } from "./workflows/WorkflowsScreen.tsx";
 import { TraceScreen } from "./trace/TraceScreen.tsx";
+import { ResultsScreen } from "./results/ResultsScreen.tsx";
 
 /** What every screen is given: the configuration and the user's current choices. */
 export interface ScreenProps {
@@ -18,7 +19,7 @@ export interface ScreenProps {
 	setFolder: (folder: string) => void;
 }
 
-type View = "work" | "workflows" | "trace" | "agents";
+type View = "work" | "workflows" | "trace" | "agents" | "results";
 
 function stored(key: string, fallback: string): string {
 	try {
@@ -39,8 +40,10 @@ function store(key: string, value: string) {
 export function App() {
 	const [config, setConfig] = useState<AppConfig | null>(null);
 	const [error, setError] = useState("");
+	const [lab, setLab] = useState(() => stored("ab.lab", "true") !== "false");
 	const [view, setView] = useState<View>(() => {
 		const saved = stored("ab.view", "work");
+		if (saved === "results" && lab) return "results";
 		return saved === "workflows" || saved === "trace" || saved === "agents" ? saved : "work";
 	});
 	const [dark, setDark] = useState(() => stored("ab.theme", "light") === "dark");
@@ -96,8 +99,21 @@ export function App() {
 						Trace
 					</button>
 					<button type="button" className="btn" aria-pressed={view === "agents"} onClick={() => go("agents")}>Agents</button>
+					{lab && <div className="results-lab-tab">
+						<span className="small muted">Lab, only you</span>
+						<button type="button" className="btn" aria-pressed={view === "results"} onClick={() => go("results")}>Results</button>
+					</div>}
 				</nav>
 				<div className="spacer" />
+				<label className="check">
+					<input type="checkbox" checked={lab} onChange={(event) => {
+						const enabled = event.target.checked;
+						setLab(enabled);
+						store("ab.lab", String(enabled));
+						if (!enabled && view === "results") go("work");
+					}} />
+					Lab tools
+				</label>
 				<label className="check">
 					Agent
 					<select
@@ -151,6 +167,7 @@ export function App() {
 				<div hidden={view !== "agents"} style={{ height: "100%" }}>
 					<AgentsScreen {...props} onChanged={reloadConfig} />
 				</div>
+				{lab && view === "results" && <ResultsScreen />}
 			</main>
 		</div>
 	);

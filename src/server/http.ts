@@ -9,30 +9,33 @@ import { booleanField, HttpError, readJson, record, sendJson, stringField } from
 import { streamEvents } from "./sse.ts";
 import { listTraces, readTrace } from "../traces.ts";
 import type { TraceInfo } from "../shared/trace.ts";
+import { readResults } from "../results.ts";
 
 export interface ServerOptions {
 	/** Folder holding the built browser app (index.html, assets). Optional. */
 	webDir?: string;
 	runsDirs?: string[];
 	agentsDir?: string;
+	allowedHosts?: string[];
 }
 
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const workflowId = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
-function localAuthority(authority: string | undefined): boolean {
-	if (!authority || !/^(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?$/i.test(authority)) return false;
-	try { return localHosts.has(new URL(`http://${authority}`).hostname); }
+function allowedAuthority(authority: string | undefined, hosts: Set<string>): boolean {
+	const match = authority?.match(/^(\[[0-9a-f:]+\]|[a-z0-9.-]+)(?::[0-9]+)?$/i);
+	if (!match || !hosts.has(match[1]!.toLowerCase())) return false;
+	try { return hosts.has(new URL(`http://${authority}`).hostname); }
 	catch { return false; }
 }
 
-function checkSafety(request: IncomingMessage): void {
-	if (!localAuthority(request.headers.host)) throw new HttpError(403, "Requests from other hosts are not allowed.");
+function checkSafety(request: IncomingMessage, hosts: Set<string>): void {
+	if (!allowedAuthority(request.headers.host, hosts)) throw new HttpError(403, "Requests from other hosts are not allowed.");
 	const origin = request.headers.origin;
 	if (origin !== undefined) {
 		try {
 			const url = new URL(origin);
-			if ((url.protocol === "http:" || url.protocol === "https:") && localAuthority(url.host) && !url.username && !url.password) return;
+			if ((url.protocol === "http:" || url.protocol === "https:") && allowedAuthority(url.host, hosts) && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash) return;
 		} catch { /* Invalid origins are rejected below. */ }
 		throw new HttpError(403, "Requests from other sites are not allowed.");
 	}
@@ -47,15 +50,20 @@ function validWorkflowId(id: string): void {
 }
 
 export function createAppServer(engine: Engine, options: ServerOptions = {}): Server {
+	const hosts = new Set([...localHosts, ...(options.allowedHosts ?? []).map((host) => host.toLowerCase())]);
 	const sessions = new Map<string, Session>();
 	const runs = new Map<string, WorkflowRun>();
 	async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
-		checkSafety(request);
+		checkSafety(request, hosts);
 		const rawUrl = request.url ?? "/";
 		let pathname: string;
 		try { pathname = decodeURIComponent(rawUrl.split("?")[0] ?? "/"); }
 		catch { throw new HttpError(400, "Invalid URL."); }
 		const query = new URL(rawUrl, "http://localhost").searchParams;
+		if (pathname === "/api/results") {
+			method(request, "GET");
+			return sendJson(response, options.runsDirs?.[0] ? await readResults(options.runsDirs[0]) : []);
+		}
 		if (pathname === "/api/agents" || /^\/api\/agents\/[^/]+$/.test(pathname)) {
 			const id = pathname === "/api/agents" ? undefined : pathname.slice("/api/agents/".length);
 			if (id === undefined) {

@@ -45,7 +45,7 @@ let fake: ReturnType<typeof fakeEngine>;
 beforeEach(async () => {
 	folder = await fs.mkdtemp(path.join(os.tmpdir(), "server-test-"));
 	fake = fakeEngine();
-	server = createAppServer(fake.engine, { webDir: path.join(folder, "web") });
+	server = createAppServer(fake.engine, { webDir: path.join(folder, "web"), runsDirs: [folder, path.join(folder, "ignored")], allowedHosts: ["172.20.1.126"] });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("Missing server address.");
@@ -76,9 +76,9 @@ async function expectError(response: Response, status: number, message?: string)
 	else expect(body).toEqual({ error: expect.any(String) });
 }
 
-async function rawGet(url: string, host?: string) {
+async function rawGet(url: string, host?: string, endpoint = base) {
 	return new Promise<{ status: number; text: string }>((resolve, reject) => {
-		const req = request(base, { path: url, headers: host ? { host } : undefined }, (res) => {
+		const req = request(endpoint, { path: url, headers: host ? { host } : undefined }, (res) => {
 			let text = "";
 			res.setEncoding("utf8");
 			res.on("data", (chunk) => { text += chunk; });
@@ -90,6 +90,33 @@ async function rawGet(url: string, host?: string) {
 }
 
 describe("local HTTP server", () => {
+	it("accepts an allowed host but rejects a different Origin", async () => {
+		expect((await rawGet("/api/config", "172.20.1.126:4600")).status).toBe(200);
+		expect((await fetch(base + "/api/config", { headers: { Origin: "http://172.20.1.126:4600" } })).status).toBe(200);
+		expect((await fetch(base + "/api/config", { headers: { Origin: "http://other.example:4600" } })).status).toBe(403);
+		for (const host of ["172.20.1.126.evil", "172.20.1.126@evil", "172.20.1.126/path"]) expect((await rawGet("/api/config", host)).status).toBe(403);
+	});
+
+	it("keeps default hosts strict", async () => {
+		const strict = createAppServer(fake.engine);
+		await new Promise<void>((resolve) => strict.listen(0, "127.0.0.1", resolve));
+		try {
+			const address = strict.address();
+			if (!address || typeof address === "string") throw new Error("Missing address.");
+			expect((await rawGet("/api/config", "172.20.1.126:4600", `http://127.0.0.1:${address.port}`)).status).toBe(403);
+			for (const host of ["127.1", "2130706433", "0x7f000001"]) expect((await rawGet("/api/config", host, `http://127.0.0.1:${address.port}`)).status).toBe(403);
+		} finally { await new Promise<void>((resolve) => { strict.close(() => resolve()); strict.closeAllConnections(); }); }
+	});
+
+	it("reads scored results only from the first runs folder", async () => {
+		expect(await (await fetch(base + "/api/results")).json()).toEqual([]);
+		const row = { when: "2026-11-15T00:00:00Z", suite: "H", level: "medium", server: "local", model: "m", setup: "agent", pass: true, verdict: "PASS", toolCalls: 12, seconds: 41, trace: null };
+		await fs.mkdir(path.join(folder, "ignored"));
+		await fs.writeFile(path.join(folder, "ignored", "results.jsonl"), JSON.stringify({ ...row, model: "ignored" }) + "\n");
+		await fs.writeFile(path.join(folder, "results.jsonl"), JSON.stringify(row) + "\nbroken\n");
+		expect(await (await fetch(base + "/api/results")).json()).toEqual([row]);
+		await expectError(await json("/api/results", "POST"), 405);
+	});
 	it("returns config and contains unexpected engine exceptions", async () => {
 		expect(await (await fetch(base + "/api/config")).json()).toEqual({ agents: [], servers: [], defaultFolder: "project" });
 		fake.engine.config.mockRejectedValueOnce(new Error("Config unavailable."));
