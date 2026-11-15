@@ -169,6 +169,20 @@ The improvement loop: measure on a tuning set, read the failed runs, make a gene
 - In progress: VerilogEval dev run (39 problems, single agent, thinking off); Codex task V (module header checked against the spec, two compile hints).
 - Idea to put to the owner: a co-simulation tool that checks a streaming block against the task's bit-true Python model, so the small model does not have to write its own testbench.
 
+**VerilogEval dev set (39 problems, Gemma 4 E4B, single agent, thinking off), 2026-11-15:**
+
+| Code | Passed | Median s | Out of time | Note |
+|---|---|---|---|---|
+| 9e002d9 (before the testbench changes) | 22 of 39 (56%) | 115 | 12 | The model wrote testbenches nobody asked for; an XNOR gate took 51 s |
+| a709768 (design-first prompt only) | 19 of 39 (49%) | 64 | 12 | Still wrote testbenches on harder problems and damaged correct designs |
+| d3f34dc (harness refuses a testbench the task does not ask for) | **24 of 39 (62%)** | **17** | 0 | 13 wrong output, 1 compile error, 1 judge error |
+
+Tuning set with d3f34dc, `fpga-fast`, two runs each: gain 2 of 2, counter 2 of 2, fir4 2 of 2.
+
+Owner's steer (2026-11-15): help the testbench writer, but the testbench matters little when the RTL is right. Built for that: `tb_skeleton` (generates a compiling testbench from the design's ports), `tb_checks` (fills only the checks), testbench hints, the design protected during the testbench step, and the rule above.
+
+What the 15 remaining dev failures are: a renamed port and a changed width (2), a wrong concatenation order (1), the rest wrong logic in state machines, Karnaugh maps and cellular automata. In progress: interface check for port lists written as bullets (Codex task X), two rule lines (exact ports, concatenation order), the same set with thinking on.
+
 Queued for Codex at 15:16 on 2026-11-15 (done), in order: S (agent asks the user instead of guessing), T (VerilogEval runner), U (quality gate).
 
 - [x] Retry-workflow score read (1 of 4, retries were broken); fixed and re-measured (4 of 4 on gain with `fpga-fast`).

@@ -3,6 +3,9 @@ name: verilog-rules
 description: Reliable synthesizable Verilog-2001 and Icarus testbenches.
 always: true
 ---
+Use exactly the module name and the ports the spec gives: the same names, directions and widths, and nothing added. If the spec lists no clock, the module is combinational: use assign or always @*, with no registers and no reset.
+In a concatenation the first item is the most significant: "a, b, c followed by two 1 bits" is {a, b, c, 2'b11}.
+
 Declare every wire, reg, integer and localparam at module level, before use, never inside always.
 Use non-blocking <= in clocked blocks and blocking = in combinational blocks.
 Give combinational outputs defaults and assign every path to avoid latches.
