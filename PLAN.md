@@ -181,7 +181,16 @@ The improvement loop: measure on a tuning set, read the failed runs, make a gene
 | ce113d7 (interface check reads bullet-list ports; rules: exact ports, concatenation order) | 25 of 39 (64%) | 15 | 0 | No compile error at the judge any more |
 | dba1fbf (state-machine method in `reset-and-state`, offered by default) | **26 of 39 (67%)** | 17 | 0 | 10 wrong output, 1 compile error, 1 no file, 1 judge error (runner mislabels a mismatch) |
 
-Each step up of one or two problems is within run-to-run variation; the trend over five runs and the sixfold speed gain are not.
+| Codex round 1 as delivered (driver conflicts and out-of-range selects made compile failures) | 22 of 39 (56%) | 19 | 2 | Regression, reported by Codex itself; a guarded select that is correct still draws the warning |
+| c7778f9 (round 1 adjusted: those two checks are hints; register read-back check kept) | **27 of 39 (69%)** | 19 | 1 | 11 wrong output; best so far |
+
+Each step up of one or two problems is within run-to-run variation; the trend over the runs and the sixfold speed gain are not.
+
+How rounds are run since 2026-11-15 evening: Codex runs a whole round from `briefs/round.md` and writes `docs/rounds/<date>-<n>.md`; the owner's rule is "always guide and verify codex work", so nothing is committed before the checks are rerun here and the numbers re-measured on the frozen copy.
+
+Raw test (owner's request): `scripts/verilog_eval_raw.sh` sends one request per problem in the benchmark's own zero-shot format; `node scripts/verilog_eval_report.mjs --compare <harness folder> <raw folder>` prints both side by side; `docs/verilog-eval.md` has the commands for this PC and the server; `docs/test-workflows.svg` shows the two flows.
+
+Old harness easy, Gemma 4 E4B, after round 1 (register read-back check): 0 of 4. Two runs did not compile at the judge, one had read-back 8 of 8 but data path 4 of 16. Total so far on this task with E4B: 0 of 30. The harness faults found on the way are fixed (paths, uncompiled files, testbench boilerplate, read-back check); what is left is the model. **Next real step for this task: run it with the 26B model on the server.**
 
 Tuning set with d3f34dc, `fpga-fast`, two runs each: gain 2 of 2, counter 2 of 2, fir4 2 of 2.
 
