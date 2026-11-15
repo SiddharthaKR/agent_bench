@@ -147,7 +147,16 @@ All numbers are for E4B. The real target, Gemma 4 26B on the server, has not bee
 
 ## Next steps
 
-Priority set by the owner on 2026-11-15: **accuracy and speed of FPGA work first**; MCP and other extras are low priority.
+Priority set by the owner on 2026-11-15: **accuracy and speed of FPGA work first**; MCP and other extras are low priority. His goal in his words: "produce correct, industry level, speed, fpga code workflow using this tool for local models by repetitive improvement".
+
+The improvement loop: measure on a tuning set, read the failed runs, make a general fix (rule, hint, check, workflow), re-measure, then confirm on tasks that were not used for tuning. Three measures:
+1. Our nine tasks: three tuning, six held-out (`scripts/eval_set.sh`).
+2. The old harness's easy and medium tasks with the hidden judge (`scripts/h_task.sh`).
+3. NVlabs VerilogEval, split into dev and held-out (`scripts/verilog_eval.sh`, brief T, being built).
+
+"Industry level" is measured separately from pass or fail by a quality gate (brief U, being built): latches, blocking and non-blocking misuse, multiple drivers, plus Verilator and Yosys where installed.
+
+Queued for Codex at 15:16 on 2026-11-15, in order: S (agent asks the user instead of guessing), T (VerilogEval runner), U (quality gate).
 
 - [x] Retry-workflow score read (1 of 4, retries were broken); fixed and re-measured (4 of 4 on gain with `fpga-fast`).
 - [x] MCP servers (Codex task K) committed; tests pass. Its card on the Agents screen is not yet checked in the browser (low priority).
