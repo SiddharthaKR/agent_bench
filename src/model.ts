@@ -16,6 +16,8 @@ export interface ServerConfig {
 	/** Left unset unless configured, so the server's own default applies. */
 	temperature?: number;
 	apiKey?: string;
+	/** Extra fields added to every chat request, for server-specific settings such as reasoning_effort. */
+	extra?: Record<string, unknown>;
 }
 
 export interface ChatMessage {
@@ -247,6 +249,7 @@ export function createStreamFn(options: StreamFnOptions): StreamFn {
 			// No stop sequence: on a thinking model it also cuts the thinking, which left the reply
 			// empty (seen with Gemma 4 on Ollama). Text after @end is ignored by the parser instead.
 			const body: Record<string, unknown> = {
+				...options.server.extra,
 				model: options.server.model,
 				messages,
 				stream: true,
