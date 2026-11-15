@@ -1,5 +1,6 @@
 export interface SkillInfo { name: string; description: string; always: boolean; enabled: boolean; }
 export interface ToolInfo { name: string; summary: string; enabled: boolean; }
+export interface McpServerInfo { name: string; command: string; args: string[]; enabled: boolean; }
 export interface AgentDetail {
 	id: string;
 	name: string;
@@ -7,6 +8,7 @@ export interface AgentDetail {
 	tools: ToolInfo[];
 	skills: SkillInfo[];
 	subagents: { id: string; name: string; enabled: boolean }[];
+	mcp: McpServerInfo[];
 	maxTurns: number;
 	maxSeconds: number | null;
 	smallFileLines: number;
@@ -19,6 +21,7 @@ export interface AgentUpdate {
 	tools: string[];
 	skills: string[];
 	subagents: string[];
+	mcp: McpServerInfo[];
 	maxTurns: number;
 	maxSeconds: number | null;
 	smallFileLines: number;

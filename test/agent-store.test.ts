@@ -10,8 +10,31 @@ let dir: string;
 beforeEach(async () => { dir = await mkdtemp(path.join(os.tmpdir(), "agents-test-")); });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 function update(): AgentUpdate {
-	return { name: "Edited", prompt: "Work carefully.", tools: ["read_file"], skills: [], subagents: [], maxTurns: 25, maxSeconds: null, smallFileLines: 50, trimContext: true };
+	return { name: "Edited", prompt: "Work carefully.", tools: ["read_file"], skills: [], subagents: [], mcp: [], maxTurns: 25, maxSeconds: null, smallFileLines: 50, trimContext: true };
 }
+it("round-trips MCP settings while keeping env private and preserving it by name", async () => {
+	await createAgent(dir, "one", "One");
+	const file = path.join(dir, "one", "agent.json");
+	const raw = JSON.parse(await readFile(file, "utf8"));
+	await writeFile(file, JSON.stringify({ ...raw, mcp: [{ name: "docs", command: "old", args: [], enabled: true, env: { KEY: "secret" } }] }));
+	const mcp = [{ name: "docs", command: "node", args: ["server.js", "two words"], enabled: false }];
+	const detail = await saveAgent(dir, "one", { ...update(), mcp });
+	expect(detail.mcp).toEqual(mcp);
+	expect(JSON.parse(await readFile(file, "utf8")).mcp).toEqual([{ ...mcp[0], env: { KEY: "secret" } }]);
+	expect(JSON.stringify(detail)).not.toContain("secret");
+	await saveAgent(dir, "one", { ...update(), mcp: [{ ...mcp[0]!, name: "other" }] });
+	expect(JSON.parse(await readFile(file, "utf8")).mcp[0]).not.toHaveProperty("env");
+});
+it.each(["Bad", "a-b", "", "a".repeat(25)])("rejects invalid MCP name %j", async (name) => {
+	await createAgent(dir, "one", "One");
+	await expect(saveAgent(dir, "one", { ...update(), mcp: [{ name, command: "node", args: [], enabled: true }] })).rejects.toThrow(/MCP/);
+});
+it("rejects empty commands and duplicate MCP names", async () => {
+	await createAgent(dir, "one", "One");
+	const server = { name: "docs", command: "node", args: [], enabled: true };
+	await expect(saveAgent(dir, "one", { ...update(), mcp: [{ ...server, command: " " }] })).rejects.toThrow(/command/i);
+	await expect(saveAgent(dir, "one", { ...update(), mcp: [server, server] })).rejects.toThrow(/MCP/);
+});
 it("creates file-backed defaults and rejects duplicate and invalid ids", async () => {
 	const item = await createAgent(dir, "new-agent", "New agent");
 	expect(item.tools.filter((tool) => tool.enabled).map((tool) => tool.name)).toEqual(["read_file", "write_file"]);

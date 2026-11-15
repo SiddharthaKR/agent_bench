@@ -49,6 +49,7 @@ export async function readAgentDetail(agentsDir: string, id: string): Promise<Ag
 		tools: ALL_TOOLS.map((tool) => ({ name: tool.name, summary: tool.summary, enabled: file.tools.includes(tool.name) })),
 		skills: (await loadSkills(folder)).map(({ name, description, always }) => ({ name, description, always, enabled: !file.skills || file.skills.includes(name) })),
 		subagents: (await entries(agentsDir)).filter((entry) => entry.id !== id).map((entry) => ({ id: entry.id, name: String(entry.file.name), enabled: Array.isArray(raw.subagents) && raw.subagents.includes(entry.id) })),
+		mcp: (file.mcp ?? []).map(({ name, command, args, enabled }) => ({ name, command, args: args ?? [], enabled })),
 		maxTurns: file.maxTurns ?? 40, maxSeconds: file.maxSeconds ?? null, smallFileLines: file.smallFileLines ?? 150, trimContext: file.trimContext !== false,
 		promptChars: systemPrompt.length,
 	};
@@ -68,6 +69,18 @@ export async function saveAgent(agentsDir: string, id: string, update: AgentUpda
 	validName(update.name);
 	if (typeof update.prompt !== "string") invalid("Prompt must be text.");
 	strings(update.tools, "Tools"); strings(update.skills, "Skills"); strings(update.subagents, "Sub-agents");
+	if (update.mcp !== undefined) {
+		if (!Array.isArray(update.mcp)) invalid("MCP servers must be a list.");
+		const names = new Set<string>();
+		for (const server of update.mcp) {
+			if (!server || typeof server.name !== "string" || !/^[a-z0-9][a-z0-9_]{0,23}$/.test(server.name)) invalid("MCP server names must be 1 to 24 lowercase letters, digits or underscores, starting with a letter or digit.");
+			if (names.has(server.name)) invalid("MCP server names must be unique.");
+			names.add(server.name);
+			if (typeof server.command !== "string" || !server.command.trim()) invalid("MCP server command must not be empty.");
+			strings(server.args, "MCP server arguments");
+			if (typeof server.enabled !== "boolean") invalid("MCP server enabled must be a boolean.");
+		}
+	}
 	for (const name of update.tools) if (!ALL_TOOLS.some((tool) => tool.name === name)) invalid(`No such tool: ${name}.`);
 	const skills = await loadSkills(folder);
 	for (const name of update.skills) if (!skills.some((skill) => skill.name === name)) invalid(`No such skill: ${name}.`);
@@ -81,6 +94,13 @@ export async function saveAgent(agentsDir: string, id: string, update: AgentUpda
 	integer(update.smallFileLines, 0, 2000, "Whole file line limit");
 	if (typeof update.trimContext !== "boolean") invalid("Trim context must be a boolean.");
 	const file = JSON.parse(await readFile(path.join(folder, "agent.json"), "utf8")) as Record<string, unknown>;
+	if (update.mcp !== undefined) {
+		const previous = Array.isArray(file.mcp) ? file.mcp as { name: string; env?: unknown }[] : [];
+		file.mcp = update.mcp.map(({ name, command, args, enabled }) => {
+			const env = previous.find((server) => server.name === name)?.env;
+			return { name, command, args, enabled, ...(env !== undefined ? { env } : {}) };
+		});
+	}
 	Object.assign(file, {
 		name: update.name, tools: update.tools, skills: update.skills, subagents: update.subagents,
 		maxTurns: update.maxTurns, maxSeconds: update.maxSeconds, smallFileLines: update.smallFileLines, trimContext: update.trimContext,

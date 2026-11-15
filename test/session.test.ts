@@ -47,6 +47,12 @@ const idleAfterWork = (session: Session) => {
 	});
 };
 
+it("emits and traces MCP startup problems as bad notes", async () => {
+	await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "docs", command: "missing-mcp-command-123", args: [], enabled: true }] }));
+	const session = await open(fakeModel(["Done."]), true);
+	expect(session.events).toContainEqual(expect.objectContaining({ type: "note", tone: "bad", text: expect.stringContaining('MCP server "docs" could not start:') }));
+});
+
 let root: string;
 let workspace: string;
 

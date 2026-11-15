@@ -44,6 +44,8 @@
 .agents-prompt { grid-column: 1 / -1; }
 .agents-prompt textarea { resize: vertical; width: 100%; }
 .agents-delete { display: flex; justify-content: flex-end; }
+.agents-mcp-row { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.agents-mcp-row label { min-width: 0; }
 @media (max-width: 760px) {
 	.agents-screen { grid-template-columns: minmax(0, 1fr); }
 }

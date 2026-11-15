@@ -66,6 +66,45 @@ async function traceEvents(dir: string) {
 }
 
 describe("runAgent with a scripted model", () => {
+	it("reserves the internal malformed-call tool name when adding MCP tools", async () => {
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "invalid", command: process.execPath, args: [path.resolve("test/fixtures/mcp-echo-server.mjs"), "--internal-call"], enabled: true }] }));
+		const model = fakeModel(["@tool unknown\n@end", "Done."]);
+		const result = await run(model);
+		expect(await traceEvents(result.traceDir)).toContainEqual(expect.objectContaining({ text: expect.stringContaining('Tool name "invalid_call" is already in use.') }));
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("Write the call again");
+	});
+
+	it("does not apply the built-in edit policy to MCP tools with edit names", async () => {
+		await writeFile(path.join(workspace, "small.txt"), "A small file.\n");
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "replace", command: process.execPath, args: [path.resolve("test/fixtures/mcp-echo-server.mjs"), "--edit-lines"], enabled: true }] }));
+		const model = fakeModel(["@tool replace_lines\npath: small.txt\nfrom: 1\nto: 1\n@end", "Done."]);
+		const result = await run(model);
+		expect(result.toolErrors).toBe(0);
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("MCP result");
+	});
+
+	it("adds MCP tools to the prompt and sends their results back to the model", async () => {
+		const pidFile = path.join(root, "mcp-pid");
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "docs", command: process.execPath, args: [path.resolve("test/fixtures/mcp-echo-server.mjs")], env: { MCP_PID_FILE: pidFile }, enabled: true }] }));
+		const model = fakeModel(["@tool docs_echo\ntext: hello MCP\n@end", "Received it."]);
+		const result = await run(model);
+		expect(result.reason).toBe("done");
+		expect(result.toolCalls).toBe(1);
+		expect(result.toolErrors).toBe(0);
+		expect(model.requests[0]!.messages[0]!.content).toContain("docs_echo");
+		expect(model.requests[0]!.messages[0]!.content).toContain("Add two numbers for $&.");
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("hello MCP\nend");
+		const pid = Number(await readFile(pidFile, "utf8"));
+		expect(() => process.kill(pid, 0)).toThrow();
+	});
+
+	it("traces MCP startup problems and continues the run", async () => {
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "docs", command: "missing-mcp-command-123", args: [], enabled: true }] }));
+		const result = await run(fakeModel(["Done."]));
+		expect(result.reason).toBe("done");
+		expect(await traceEvents(result.traceDir)).toContainEqual(expect.objectContaining({ text: expect.stringContaining('MCP server "docs" could not start:') }));
+	});
+
 	it("refuses small range edits but allows whole-file rewrites", async () => {
 		await writeFile(path.join(workspace, "a.v"), "old\n");
 		const model = fakeModel(["@tool replace_lines\npath: a.v\nfrom: 1\nto: 1\n---\nwrong\n@end", "@tool write_file\npath: a.v\n---\nnew\n@end", "Done."]);

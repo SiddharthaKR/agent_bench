@@ -1,12 +1,42 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import type { ScreenProps } from "../App.tsx";
-import type { AgentDetail } from "../../../src/shared/agents.ts";
+import type { AgentDetail, McpServerInfo } from "../../../src/shared/agents.ts";
 import { api } from "../api.ts";
-import { agentUpdate } from "./logic.ts";
+import { agentUpdate, formatMcpArguments, parseMcpArguments } from "./logic.ts";
 import "./agents.css";
 
 const snapshot = (agent: AgentDetail) => JSON.stringify(agentUpdate(agent));
 const sentence = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+function McpCard({ servers, onChange }: { servers: McpServerInfo[]; onChange: (servers: McpServerInfo[]) => void }) {
+	const [adding, setAdding] = useState(false);
+	const [name, setName] = useState("");
+	const [command, setCommand] = useState("");
+	const [args, setArgs] = useState("");
+	const [error, setError] = useState("");
+	return <section className="card agents-card"><h2>MCP servers</h2>
+		{servers.length ? servers.map((server, index) => <div className="agents-mcp-row" key={server.name}>
+			<label className="agents-check"><input type="checkbox" checked={server.enabled} onChange={(event) => onChange(servers.map((item, i) => i === index ? { ...item, enabled: event.target.checked } : item))} /><span>{server.name}<span className="mono small muted agents-description">{formatMcpArguments([server.command, ...server.args])}</span></span></label>
+			<button type="button" className="btn" aria-label={`Remove MCP server ${server.name}`} onClick={() => onChange(servers.filter((_, i) => i !== index))}>Remove</button>
+		</div>) : <p className="muted">No MCP servers connected.</p>}
+		<button type="button" className="btn btn-dashed" onClick={() => setAdding(true)}>Add MCP server</button>
+		{adding && <form className="agents-form" onSubmit={(event) => {
+			event.preventDefault();
+			try {
+				if (servers.some((server) => server.name === name)) throw new Error("MCP server names must be unique.");
+				onChange([...servers, { name, command: command.trim(), args: parseMcpArguments(args), enabled: true }]);
+				setAdding(false); setName(""); setCommand(""); setArgs(""); setError("");
+			} catch (failure) { setError(sentence(failure)); }
+		}}>
+			<label className="field">Name<input className="input" required pattern="[a-z0-9][a-z0-9_]{0,23}" maxLength={24} title="Lowercase letters, digits and underscores" value={name} onChange={(event) => setName(event.target.value)} /></label>
+			<label className="field">Command<input className="input mono" required pattern=".*\S.*" value={command} onChange={(event) => setCommand(event.target.value)} /></label>
+			<label className="field">Arguments<input className="input mono" value={args} onChange={(event) => setArgs(event.target.value)} /><span className="small muted">Space-separated, double quotes for an argument with spaces.</span></label>
+			{error && <div className="tone-bad" role="alert">{error}</div>}
+			<button className="btn" type="submit">Add</button>
+		</form>}
+		<p className="small muted">Each tool of an enabled server is added to this agent's prompt. Keep the list short.</p>
+	</section>;
+}
 
 export function AgentsScreen(props: ScreenProps & { onChanged: () => void | Promise<void> }) {
 	const [agents, setAgents] = useState<AgentDetail[]>([]);
@@ -142,6 +172,7 @@ export function AgentsScreen(props: ScreenProps & { onChanged: () => void | Prom
 					<section className="card agents-card"><h2>Skills</h2>{agent.skills.length ? agent.skills.map((skill) => <label className="agents-check" key={skill.name}><input type="checkbox" checked={skill.enabled} onChange={(event) => edit({ ...agent, skills: agent.skills.map((item) => item.name === skill.name ? { ...item, enabled: event.target.checked } : item) })} /><span>{skill.name}<span className="small muted agents-description">{skill.description}</span><span className="pill">{skill.always ? "always in the prompt" : "loaded on request"}</span></span></label>) : <p className="muted">No skills in this agent's folder. Add a Markdown file under agents/{agent.id}/skills/.</p>}</section>
 					<section className="card agents-card"><h2>Sub-agents</h2>{agent.subagents.length ? agent.subagents.map((subagent) => <label className="check" key={subagent.id}><input type="checkbox" checked={subagent.enabled} onChange={(event) => edit({ ...agent, subagents: agent.subagents.map((item) => item.id === subagent.id ? { ...item, enabled: event.target.checked } : item) })} />{agents.find((item) => item.id === subagent.id)?.name ?? subagent.name}</label>) : <p className="muted">No other agents yet.</p>}</section>
 					<section className="card agents-card agents-prompt"><h2>System prompt</h2><label className="field">prompt.md<textarea className="input mono" rows={10} value={agent.prompt} onChange={(event) => edit({ ...agent, prompt: event.target.value })} /></label></section>
+					<McpCard key={agent.id} servers={agent.mcp} onChange={(mcp) => edit({ ...agent, mcp })} />
 				</fieldset>
 				<div className="agents-delete"><button type="button" className="btn btn-danger" disabled={busy} onClick={() => void remove()}>Delete agent</button></div>
 			</>}

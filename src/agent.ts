@@ -19,6 +19,8 @@ import { createStreamFn, makeModel } from "./model.ts";
 import { INVALID_CALL, renderToolHelp } from "./protocol.ts";
 import { pickTools, realExec } from "./tools/index.ts";
 import { createTrace } from "./trace.ts";
+import { connectMcp } from "./mcp.ts";
+import type { McpServer } from "./mcp.ts";
 import type { CommandConfig, Exec, ToolContext, ToolSpec } from "./types.ts";
 
 export interface AgentFile {
@@ -30,6 +32,7 @@ export interface AgentFile {
 	trimContext?: boolean;
 	maxSeconds?: number;
 	subagents?: string[];
+	mcp?: McpServer[];
 }
 
 export interface RunOptions {
@@ -146,136 +149,146 @@ export async function loadAgent(agentDir: string, options: LoadAgentOptions = {}
 export async function runAgent(options: RunOptions): Promise<RunResult> {
 	const started = Date.now();
 	let runSubagent: SubagentRunner;
-	const { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir, {
+	let { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir, {
 		depth: options.depth,
 		overrides: options.overrides,
 		runSubagent: (...args) => runSubagent(...args),
 	});
-
-	const trace = createTrace(options.runsDir, path.basename(options.agentDir));
-	const ctx: ToolContext = { workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
-	const guard = new LoopGuard({ maxCalls: options.overrides?.maxTurns ?? agentFile.maxTurns ?? 40 });
-	const seconds = options.maxSeconds ?? agentFile.maxSeconds;
-	const remainingSeconds = () => seconds === undefined ? undefined : Math.max(0, seconds - (Date.now() - started) / 1000);
-	runSubagent = createSubagentRunner(options, trace, remainingSeconds);
-
-	let stoppedBy: EndReason | undefined;
-	let modelCalls = 0;
-	let toolCalls = 0;
-	let toolErrors = 0;
-	let invalidCalls = 0;
-	let firstPromptTokens = 0;
-	let lastPromptTokens = 0;
-	let outputTokens = 0;
-	const say = options.onStep ?? (() => {});
-
-	trace.write({
-		type: "run_start",
-		agent: agentFile.name,
-		model: options.server.model,
-		server: options.server.baseUrl,
-		workspace: ctx.workspace,
-		task: options.task,
-		tools: specs.map((spec) => spec.name),
-		promptChars: systemPrompt.length,
-		systemPrompt,
-	});
-
-	const agent = new Agent({
-		initialState: {
-			systemPrompt,
-			model: makeModel(options.server),
-			tools: [...specs.map((spec) => toAgentTool(spec, ctx)), invalidTool],
-		},
-		streamFn: createStreamFn({ server: options.server, tools: specs, trace, fetchFn: options.fetchFn }),
-		toolExecution: "sequential",
-		transformContext: agentFile.trimContext === false ? undefined : async (messages) => trimContext(messages),
-		afterToolCall: async ({ toolCall, args, result, isError }) => {
-			const text = result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
-			const hint = guard.noteResult({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> }, !isError, text);
-			return hint ? { content: [{ type: "text", text: `${text}\n${hint}` }, ...result.content.filter((block) => block.type !== "text")] } : undefined;
-		},
-		beforeToolCall: async ({ toolCall, args }) => {
-			const verdict = guard.check({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> });
-			if (verdict.allow) {
-				const refusal = await smallFileRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx.workspace, agentFile.smallFileLines);
-				return refusal ? { block: true, reason: refusal } : undefined;
-			}
-			trace.write({ type: "guard", tool: toolCall.name, reason: verdict.reason, stop: verdict.stop });
-			say(`     guard: ${verdict.reason}`);
-			if (verdict.stop) stoppedBy = verdict.reason.includes("limit") ? "limit" : "loop";
-			return { block: true, reason: verdict.reason, terminate: verdict.stop };
-		},
-	});
-
-	agent.subscribe((event) => {
-		if (event.type === "message_end" && event.message.role === "assistant") {
-			const message = event.message as AssistantMessage;
-			modelCalls++;
-			if (!firstPromptTokens) firstPromptTokens = message.usage.input;
-			lastPromptTokens = message.usage.input || lastPromptTokens;
-			outputTokens += message.usage.output;
-		} else if (event.type === "tool_execution_start") {
-			const { content, raw, ...rest } = (event.args ?? {}) as Record<string, unknown>;
-			trace.write({
-				type: "tool_call",
-				tool: event.toolName,
-				args: rest,
-				...(typeof content === "string" ? { contentChars: content.length, content } : {}),
-			});
-		} else if (event.type === "tool_execution_end") {
-			const text: string = event.result?.content?.[0]?.text ?? "";
-			toolCalls++;
-			if (event.toolName === INVALID_CALL) invalidCalls++;
-			else if (event.isError) toolErrors++;
-			trace.write({ type: "tool_result", tool: event.toolName, ok: !event.isError, ms: event.durationMs ?? 0, text });
-			say(`${String(toolCalls).padStart(3)}. ${event.toolName} ${event.isError ? "✗" : "✓"} ${short(text)}`);
-		}
-	});
-
-	const abort = () => agent.abort();
-	options.signal?.addEventListener("abort", abort, { once: true });
-	let timedOut = false;
-	const timer = seconds !== undefined ? setTimeout(() => { timedOut = true; agent.abort(); }, remainingSeconds()! * 1000) : undefined;
-
-	let error: string | undefined;
+	const mcp = agentFile.mcp?.some((server) => server.enabled) ? await connectMcp(agentFile.mcp, { cwd: options.agentDir, reservedNames: [INVALID_CALL, ...specs.map((spec) => spec.name)] }) : undefined;
+	const mcpNames = new Set(mcp?.tools.map((spec) => spec.name));
 	try {
-		if (!options.signal?.aborted) await agent.prompt(options.task);
-	} catch (thrown) {
-		error = (thrown as Error).message;
-	} finally {
-		clearTimeout(timer);
-		options.signal?.removeEventListener("abort", abort);
-	}
+		if (mcp?.tools.length) {
+			systemPrompt = systemPrompt.replace(renderToolHelp(specs), () => renderToolHelp([...specs, ...mcp.tools]));
+			specs.push(...mcp.tools);
+		}
 
-	const replies = [...agent.state.messages].reverse().filter((m): m is AssistantMessage => m.role === "assistant");
-	const last = replies[0];
-	const finalText = replies.map((message) => message.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim()).find(Boolean) ?? "";
-	if (last?.stopReason === "error") error = last.errorMessage ?? "Model error";
+		const trace = createTrace(options.runsDir, path.basename(options.agentDir));
+		for (const text of mcp?.problems ?? []) trace.write({ type: "note", text });
+		const ctx: ToolContext = { workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
+		const guard = new LoopGuard({ maxCalls: options.overrides?.maxTurns ?? agentFile.maxTurns ?? 40 });
+		const seconds = options.maxSeconds ?? agentFile.maxSeconds;
+		const remainingSeconds = () => seconds === undefined ? undefined : Math.max(0, seconds - (Date.now() - started) / 1000);
+		runSubagent = createSubagentRunner(options, trace, remainingSeconds);
 
-	let reason: EndReason = "done";
-	if (timedOut) { reason = "time"; error = undefined; }
-	else if (options.signal?.aborted || last?.stopReason === "aborted") reason = "aborted";
-	else if (error) reason = "error";
-	else if (stoppedBy) reason = stoppedBy;
+		let stoppedBy: EndReason | undefined;
+		let modelCalls = 0;
+		let toolCalls = 0;
+		let toolErrors = 0;
+		let invalidCalls = 0;
+		let firstPromptTokens = 0;
+		let lastPromptTokens = 0;
+		let outputTokens = 0;
+		const say = options.onStep ?? (() => {});
 
-	const result: RunResult = {
-		reason,
-		finalText,
-		...(error ? { error } : {}),
-		modelCalls,
-		toolCalls,
-		toolErrors,
-		invalidCalls,
-		blocked: guard.blocked,
-		promptChars: systemPrompt.length,
-		firstPromptTokens,
-		lastPromptTokens,
-		outputTokens,
-		ms: Date.now() - started,
-		traceDir: trace.dir,
-	};
-	trace.write({ type: "run_end", ...result });
-	trace.close({ ...result, agent: agentFile.name, model: options.server.model, task: options.task });
-	return result;
+		trace.write({
+			type: "run_start",
+			agent: agentFile.name,
+			model: options.server.model,
+			server: options.server.baseUrl,
+			workspace: ctx.workspace,
+			task: options.task,
+			tools: specs.map((spec) => spec.name),
+			promptChars: systemPrompt.length,
+			systemPrompt,
+		});
+
+		const agent = new Agent({
+			initialState: {
+				systemPrompt,
+				model: makeModel(options.server),
+				tools: [...specs.map((spec) => toAgentTool(spec, ctx)), invalidTool],
+			},
+			streamFn: createStreamFn({ server: options.server, tools: specs, trace, fetchFn: options.fetchFn }),
+			toolExecution: "sequential",
+			transformContext: agentFile.trimContext === false ? undefined : async (messages) => trimContext(messages),
+			afterToolCall: async ({ toolCall, args, result, isError }) => {
+				const text = result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+				const hint = guard.noteResult({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> }, !isError, text);
+				return hint ? { content: [{ type: "text", text: `${text}\n${hint}` }, ...result.content.filter((block) => block.type !== "text")] } : undefined;
+			},
+			beforeToolCall: async ({ toolCall, args }) => {
+				const verdict = guard.check({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> });
+				if (verdict.allow) {
+					if (mcpNames.has(toolCall.name)) return undefined;
+					const refusal = await smallFileRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx.workspace, agentFile.smallFileLines);
+					return refusal ? { block: true, reason: refusal } : undefined;
+				}
+				trace.write({ type: "guard", tool: toolCall.name, reason: verdict.reason, stop: verdict.stop });
+				say(`     guard: ${verdict.reason}`);
+				if (verdict.stop) stoppedBy = verdict.reason.includes("limit") ? "limit" : "loop";
+				return { block: true, reason: verdict.reason, terminate: verdict.stop };
+			},
+		});
+
+		agent.subscribe((event) => {
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				const message = event.message as AssistantMessage;
+				modelCalls++;
+				if (!firstPromptTokens) firstPromptTokens = message.usage.input;
+				lastPromptTokens = message.usage.input || lastPromptTokens;
+				outputTokens += message.usage.output;
+			} else if (event.type === "tool_execution_start") {
+				const { content, raw, ...rest } = (event.args ?? {}) as Record<string, unknown>;
+				trace.write({
+					type: "tool_call",
+					tool: event.toolName,
+					args: rest,
+					...(typeof content === "string" ? { contentChars: content.length, content } : {}),
+				});
+			} else if (event.type === "tool_execution_end") {
+				const text: string = event.result?.content?.[0]?.text ?? "";
+				toolCalls++;
+				if (event.toolName === INVALID_CALL) invalidCalls++;
+				else if (event.isError) toolErrors++;
+				trace.write({ type: "tool_result", tool: event.toolName, ok: !event.isError, ms: event.durationMs ?? 0, text });
+				say(`${String(toolCalls).padStart(3)}. ${event.toolName} ${event.isError ? "✗" : "✓"} ${short(text)}`);
+			}
+		});
+
+		const abort = () => agent.abort();
+		options.signal?.addEventListener("abort", abort, { once: true });
+		let timedOut = false;
+		const timer = seconds !== undefined ? setTimeout(() => { timedOut = true; agent.abort(); }, remainingSeconds()! * 1000) : undefined;
+
+		let error: string | undefined;
+		try {
+			if (!options.signal?.aborted) await agent.prompt(options.task);
+		} catch (thrown) {
+			error = (thrown as Error).message;
+		} finally {
+			clearTimeout(timer);
+			options.signal?.removeEventListener("abort", abort);
+		}
+
+		const replies = [...agent.state.messages].reverse().filter((m): m is AssistantMessage => m.role === "assistant");
+		const last = replies[0];
+		const finalText = replies.map((message) => message.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim()).find(Boolean) ?? "";
+		if (last?.stopReason === "error") error = last.errorMessage ?? "Model error";
+
+		let reason: EndReason = "done";
+		if (timedOut) { reason = "time"; error = undefined; }
+		else if (options.signal?.aborted || last?.stopReason === "aborted") reason = "aborted";
+		else if (error) reason = "error";
+		else if (stoppedBy) reason = stoppedBy;
+
+		const result: RunResult = {
+			reason,
+			finalText,
+			...(error ? { error } : {}),
+			modelCalls,
+			toolCalls,
+			toolErrors,
+			invalidCalls,
+			blocked: guard.blocked,
+			promptChars: systemPrompt.length,
+			firstPromptTokens,
+			lastPromptTokens,
+			outputTokens,
+			ms: Date.now() - started,
+			traceDir: trace.dir,
+		};
+		trace.write({ type: "run_end", ...result });
+		trace.close({ ...result, agent: agentFile.name, model: options.server.model, task: options.task });
+		return result;
+	} finally { await mcp?.close(); }
 }
