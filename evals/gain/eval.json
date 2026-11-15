@@ -1,1 +1,1 @@
-{ "level": "easy", "design": "rtl/gain.v", "tb": "tb/tb_gain.v" }
+{"level":"easy","design":"rtl/gain.v","tb":"tb/tb_gain.v","set":"tuning"}

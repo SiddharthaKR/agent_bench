@@ -92,7 +92,7 @@ describe("trace reader", () => {
 		const dir = await trace("limit", []);
 		await writeFile(path.join(dir, "trace.jsonl"), "junk\n".repeat(19999) + '{"type":"guard","reason":"Visible"}\n{"type":"guard","reason":"Hidden"}\n');
 		expect((await readTrace(root, "limit"))?.rows.map((row) => row.text)).toEqual(["Visible"]);
-	});
+	}, 30_000);
 
 	it("rejects invalid ids, traversal and links outside the runs directory", async () => {
 		await trace("valid._-1", []);

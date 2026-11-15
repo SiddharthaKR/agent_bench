@@ -1,1 +1,1 @@
-{ "level": "easy", "design": "rtl/counter.v", "tb": "tb/tb_counter.v" }
+{"level":"easy","design":"rtl/counter.v","tb":"tb/tb_counter.v","set":"tuning"}

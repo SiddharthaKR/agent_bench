@@ -34,3 +34,7 @@ Open http://localhost:4600. This is development mode, started by hand, with no s
 Agents live in `agents/<name>/agent.json` and `prompt.md`. Skills are Markdown files in `agents/<name>/skills/`. Workflows are JSON files in `workflows/`; they can also be edited in the browser. Turn off Lab tools to hide the owner's Results tab.
 
 Read [PLAN.md](PLAN.md) for the design and progress, [docs/server.md](docs/server.md) for the office server and scoring commands, and [examples/](examples/) for code usage.
+
+## Scoring tasks
+
+The tuning set contains `gain`, `counter`, and `fir4`. The held-out set contains `pwm`, `seqdet`, `regbank`, `fifo`, `accum`, and `uart_tx`. Tune skills and hints only on the tuning set; the held-out set is only measured. Run either set with `bash scripts/eval_set.sh <tuning|heldout>`, followed by the usual `eval_local.sh` options.
