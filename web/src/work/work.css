@@ -1,0 +1,90 @@
+.work-screen {
+	height: 100%;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+.work-heading, .work-tabs, .work-edit-heading, .work-result-heading, .work-actions, .work-quick, .work-notice {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	flex-wrap: wrap;
+}
+.work-heading { flex-shrink: 0; }
+.work-folder { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-ask { margin-left: auto; }
+.work-panels {
+	display: flex;
+	gap: 12px;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+}
+.work-files, .work-code, .work-conversation {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	min-width: 0;
+	overflow: hidden;
+}
+.work-files { flex: 0 0 240px; }
+.work-code { flex: 2 1 0; }
+.work-conversation { flex: 1 1 340px; min-width: 340px; }
+.work-padding, .work-folder-form, .work-tabs, .work-edit-heading, .work-result, .work-compose { padding: 12px; }
+.work-folder-form { display: flex; flex-direction: column; gap: 8px; }
+.work-tree { overflow: auto; flex: 1; min-height: 0; padding: 0 8px; }
+.work-tree p { overflow-wrap: anywhere; }
+.work-tree-row.btn {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	width: 100%;
+	min-height: 28px;
+	height: 28px;
+	text-align: left;
+	border-radius: 0;
+	font-weight: inherit;
+}
+.work-tree-row[aria-current="true"] { background: var(--tint); }
+.work-tree-row > span:first-child { width: 16px; flex-shrink: 0; }
+.work-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.work-tabs { border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.work-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-tabs .work-path { margin-left: auto; flex: 1; text-align: right; }
+.work-code-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.work-code-body[hidden] { display: none; }
+.work-save-hint { margin-left: auto; }
+.work-editor { flex: 1; min-height: 0; overflow: hidden; }
+.work-notice { padding: 8px 12px; background: var(--warnb); color: var(--warn); }
+.work-notice .btn { margin-left: auto; }
+.work-result { overflow: auto; min-height: 0; }
+.work-result-heading { margin-bottom: 12px; overflow-wrap: anywhere; }
+.work-result-heading .pill { margin-left: auto; }
+.work-diff { margin-bottom: 12px; }
+.work-diff-line { display: grid; grid-template-columns: 16px max-content minmax(0, 1fr); gap: 8px; padding: 0 8px; }
+.work-diff-line > span:last-child, .work-output, .work-block { white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-diff-line.add { background: var(--okb); color: var(--addink); }
+.work-diff-line.del { background: var(--badb); color: var(--badink); }
+.work-feed { overflow: auto; flex: 1; min-height: 0; padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow-wrap: anywhere; }
+.work-feed > * { flex-shrink: 0; }
+.work-user { align-self: flex-end; background: var(--tint); border-radius: 8px; padding: 8px 12px; max-width: 100%; white-space: pre-wrap; }
+.work-agent, .work-live { white-space: pre-wrap; }
+.work-step { border-left: 2px solid var(--line2); padding-left: 8px; }
+.work-step-button.btn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; width: 100%; text-align: left; white-space: normal; padding: 0; }
+.work-target { min-width: 0; overflow-wrap: anywhere; }
+.work-tool { font-weight: 500; }
+.work-step-detail { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.work-block { max-height: 240px; overflow: auto; margin: 0 0 8px; }
+.work-compose { border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.work-quick .btn { border-radius: 999px; white-space: normal; text-align: left; }
+.work-message { display: flex; flex-direction: column; gap: 8px; }
+.work-message .input { width: 100%; }
+@media (max-width: 999px) {
+	.work-screen { height: auto; min-height: 100%; }
+	.work-panels { flex-wrap: wrap; flex: none; }
+	.work-files { flex: 0 1 240px; max-height: 100vh; }
+	.work-code { flex: 2 1 340px; height: 100vh; }
+	.work-conversation { flex: 1 1 340px; height: 100vh; min-width: 0; }
+}

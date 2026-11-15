@@ -9,13 +9,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAgent } from "./agent.ts";
+import { loadConfig } from "./config.ts";
 import type { ServerConfig } from "./model.ts";
-import type { CommandConfig } from "./types.ts";
-
-interface Config {
-	servers: Record<string, ServerConfig>;
-	commands: CommandConfig;
-}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -38,7 +33,7 @@ async function main(): Promise<number> {
 	const task = args["task-file"] ? (await readFile(args["task-file"], "utf8")).trim() : args.task;
 	if (!task) throw new Error('Give the task with --task "<text>" or --task-file <path>.');
 
-	const config = JSON.parse(await readFile(path.join(ROOT, "config.json"), "utf8")) as Config;
+	const config = await loadConfig(ROOT);
 	const serverName = args.server ?? "local";
 	const server = config.servers[serverName];
 	if (!server) throw new Error(`No server named "${serverName}" in config.json. Known: ${Object.keys(config.servers).join(", ")}.`);

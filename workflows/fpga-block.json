@@ -1,0 +1,45 @@
+{
+	"id": "fpga-block",
+	"name": "Verilog block: write, simulate, check",
+	"task": "Describe the block to build, or name the spec file.",
+	"vars": { "design": "rtl/design.v", "tb": "tb/tb_design.v" },
+	"steps": [
+		{
+			"id": "write",
+			"type": "agent",
+			"agent": "fpga",
+			"name": "Write the design",
+			"task": "{task}\n\nWrite the design in {design}. Compile it and fix every error. Do not write a testbench."
+		},
+		{
+			"id": "compile",
+			"type": "command",
+			"name": "Compile",
+			"command": ["iverilog", "-g2012", "-o", ".build/design.out", "{design}"],
+			"onFail": { "goTo": "write", "maxRounds": 3 }
+		},
+		{
+			"id": "testbench",
+			"type": "agent",
+			"agent": "fpga",
+			"name": "Write the testbench",
+			"once": true,
+			"pause": true,
+			"task": "{task}\n\nWrite a self-checking testbench in {tb} for the module in {design}. Read only its port list. Print one line starting with PASS or FAIL for each check and call $finish at the end. Do not change {design}."
+		},
+		{
+			"id": "build",
+			"type": "command",
+			"name": "Build the simulation",
+			"command": ["iverilog", "-g2012", "-o", ".build/sim.out", "{design}", "{tb}"],
+			"onFail": { "goTo": "write", "maxRounds": 3 }
+		},
+		{
+			"id": "simulate",
+			"type": "command",
+			"name": "Simulate",
+			"command": ["vvp", ".build/sim.out"],
+			"onFail": { "goTo": "write", "maxRounds": 3 }
+		}
+	]
+}

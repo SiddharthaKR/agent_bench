@@ -5,7 +5,7 @@
  * the only place that knows both the wire format and the text protocol.
  */
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, Message, Model, TextContent, ToolCall, Usage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Message, Model, TextContent, ThinkingContent, ToolCall, Usage } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { INVALID_CALL, parseReply, renderCall, renderResult } from "./protocol.ts";
 import type { ParsedCall, ToolHelp, TraceWriter } from "./types.ts";
@@ -29,7 +29,11 @@ export interface StreamFnOptions {
 	trace: TraceWriter;
 	/** Injected in tests. */
 	fetchFn?: typeof fetch;
+	/** Called with each piece of the reply as it arrives, for live display. */
+	onDelta?: DeltaListener;
 }
+
+export type DeltaListener = (kind: "thinking" | "text", delta: string) => void;
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
 
@@ -154,7 +158,7 @@ interface Reply {
  * many minutes for one reply, and a non-streamed request is cut off by Node's
  * 5-minute wait for the response headers. A plain JSON answer is accepted too.
  */
-export async function readReply(response: Response): Promise<Reply> {
+export async function readReply(response: Response, onDelta?: DeltaListener): Promise<Reply> {
 	const type = response.headers.get("content-type") ?? "";
 	if (!type.includes("text/event-stream") || !response.body) {
 		const data = (await response.json()) as any;
@@ -181,9 +185,15 @@ export async function readReply(response: Response): Promise<Reply> {
 		}
 		const choice = data?.choices?.[0];
 		const delta = choice?.delta;
-		if (typeof delta?.content === "string") reply.text += delta.content;
 		const thought = delta?.reasoning ?? delta?.reasoning_content;
-		if (typeof thought === "string") reply.reasoning += thought;
+		if (typeof thought === "string" && thought) {
+			reply.reasoning += thought;
+			onDelta?.("thinking", thought);
+		}
+		if (typeof delta?.content === "string" && delta.content) {
+			reply.text += delta.content;
+			onDelta?.("text", delta.content);
+		}
 		if (choice?.finish_reason) reply.finish = choice.finish_reason;
 		if (data?.usage) reply.usage = data.usage;
 	};
@@ -259,7 +269,7 @@ export function createStreamFn(options: StreamFnOptions): StreamFn {
 					const detail = (await response.text()).slice(0, 500);
 					return fail("error", `Model server answered ${response.status}: ${detail}`);
 				}
-				reply = await readReply(response);
+				reply = await readReply(response, options.onDelta);
 			} catch (error) {
 				if (streamOptions?.signal?.aborted) return fail("aborted", "Stopped.");
 				return fail("error", `Could not reach the model server at ${options.server.baseUrl}: ${(error as Error).message}`);
@@ -270,7 +280,9 @@ export function createStreamFn(options: StreamFnOptions): StreamFn {
 			const usage = usageOf(reply.usage);
 			const parsed = parseReply(text);
 
-			const content: (TextContent | ToolCall)[] = [];
+			// The reasoning is kept for display only; toChatMessages never sends it back to the model.
+			const content: (TextContent | ThinkingContent | ToolCall)[] = [];
+			if (reasoning.trim()) content.push({ type: "thinking", thinking: reasoning.trim() });
 			let kind: string = parsed.kind;
 			let final = parsed.kind === "final";
 			if (parsed.kind === "final" && parsed.text === "") {
@@ -322,7 +334,11 @@ export function createStreamFn(options: StreamFnOptions): StreamFn {
 
 			stream.push({ type: "start", partial: { ...base } });
 			content.forEach((block, contentIndex) => {
-				if (block.type === "text") {
+				if (block.type === "thinking") {
+					stream.push({ type: "thinking_start", contentIndex, partial: message });
+					stream.push({ type: "thinking_delta", contentIndex, delta: block.thinking, partial: message });
+					stream.push({ type: "thinking_end", contentIndex, content: block.thinking, partial: message });
+				} else if (block.type === "text") {
 					stream.push({ type: "text_start", contentIndex, partial: message });
 					stream.push({ type: "text_delta", contentIndex, delta: block.text, partial: message });
 					stream.push({ type: "text_end", contentIndex, content: block.text, partial: message });

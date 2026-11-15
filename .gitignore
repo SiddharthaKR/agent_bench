@@ -2,3 +2,5 @@ node_modules/
 runs/
 .build/
 *.log
+web/dist/
+config.local.json

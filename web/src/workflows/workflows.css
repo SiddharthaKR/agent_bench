@@ -1,0 +1,367 @@
+.wf-screen {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	min-width: 0;
+	max-width: 100%;
+}
+.wf-screen label:not(.check) {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+	font-size: 12px;
+	color: var(--muted);
+}
+.wf-screen .input {
+	width: 100%;
+	color: var(--ink);
+	font-size: 14px;
+}
+.wf-screen .input.mono {
+	font-size: 13px;
+}
+.wf-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.wf-between {
+	justify-content: space-between;
+}
+.wf-choices {
+	flex: 1;
+}
+.wf-choice {
+	min-width: 0;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.wf-workflow,
+.wf-panel-card {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 16px;
+	min-width: 0;
+}
+.wf-fields {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: 12px;
+}
+.wf-fields > label {
+	flex: 1 1 160px;
+}
+.wf-fields > .wf-task {
+	flex: 3 1 320px;
+}
+.wf-actions {
+	display: flex;
+	gap: 8px;
+}
+.wf-variables {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.wf-variable {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+	align-items: end;
+	gap: 8px;
+}
+.wf-columns {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 320px;
+	align-items: start;
+	gap: 16px;
+	min-width: 0;
+}
+.wf-steps,
+.wf-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 0;
+}
+.wf-step {
+	min-width: 0;
+	scroll-margin: 16px;
+}
+.wf-step-running {
+	border-color: var(--acc);
+}
+.wf-step-failed {
+	border-color: var(--bad);
+}
+.wf-step-header {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	padding: 12px;
+	text-align: left;
+	white-space: normal;
+}
+.wf-step-heading {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+}
+.wf-step-heading > .mono {
+	flex-basis: 100%;
+}
+.wf-ellipsis {
+	display: block;
+	max-width: 100%;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wf-step-body {
+	display: flex;
+	flex-direction: column;
+	align-items: start;
+	gap: 12px;
+	padding: 0 12px 12px;
+}
+.wf-editor {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+	width: 100%;
+	margin: 0;
+	padding: 12px 0 0;
+	border: 0;
+	border-top: 1px solid var(--line);
+	min-width: 0;
+}
+.wf-wide {
+	grid-column: 1 / -1;
+}
+.wf-result,
+.wf-output {
+	margin: 0;
+	width: 100%;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 12px;
+}
+.wf-result {
+	max-height: 160px;
+	overflow: auto;
+	padding: 8px;
+	background: var(--bg);
+	border-radius: 6px;
+}
+.wf-result-failed {
+	background: var(--badb);
+	color: var(--badink);
+}
+.wf-live,
+.wf-folder,
+.wf-log,
+.wf-panel-card > div,
+.wf-step-heading > span:first-child {
+	overflow-wrap: anywhere;
+}
+.wf-add {
+	width: 100%;
+}
+.wf-counts {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+.wf-stat {
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 12px;
+}
+.wf-stat strong {
+	font-size: 20px;
+	font-weight: 600;
+}
+.wf-panel-card p {
+	margin: 0;
+}
+.wf-log {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.wf-graph-card {
+	padding: 16px;
+	min-width: 0;
+}
+.wf-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+}
+.wf-legend > span {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+.wf-legend i {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border: 1px solid var(--muted);
+}
+.wf-legend-agent {
+	border-radius: 50%;
+}
+.wf-legend-command {
+	border-radius: 3px;
+}
+.wf-legend .wf-legend-arc {
+	border-bottom: none;
+	border-radius: 50% 50% 0 0;
+}
+.wf-graph-scroll {
+	overflow-x: auto;
+	padding-bottom: 8px;
+}
+.wf-graph {
+	display: flex;
+	position: relative;
+	margin-top: 16px;
+	isolation: isolate;
+}
+.wf-node {
+	display: flex;
+	position: relative;
+	flex: 1 1 0;
+	flex-direction: column;
+	align-items: center;
+	justify-content: start;
+	gap: 4px;
+	min-width: 0;
+	padding: 0 8px 8px;
+	border: 0;
+	white-space: normal;
+	text-align: center;
+}
+.wf-node-name {
+	font-size: 13px;
+	font-weight: 500;
+	overflow-wrap: anywhere;
+}
+.wf-node .small {
+	font-weight: 400;
+}
+.wf-node .wf-node-status {
+	font-weight: 500;
+}
+.wf-marker {
+	display: flex;
+	position: relative;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 28px;
+	height: 28px;
+	margin-bottom: 8px;
+	border: 2px solid var(--line2);
+	background: var(--card);
+	color: var(--muted);
+}
+.wf-marker-agent {
+	border-radius: 50%;
+}
+.wf-marker-command {
+	border-radius: 7px;
+}
+.wf-marker-running {
+	border-color: var(--acc);
+	background: var(--tint);
+	color: var(--tintink);
+	box-shadow: 0 0 0 4px var(--tint);
+}
+.wf-marker-passed,
+.wf-marker-kept {
+	border-color: var(--acc);
+	background: var(--acc);
+	color: var(--onacc);
+}
+.wf-marker-failed {
+	border-color: var(--bad);
+	background: var(--badb);
+	color: var(--badink);
+}
+.wf-connector {
+	position: absolute;
+	z-index: -1;
+	top: 13px;
+	left: 50%;
+	width: 100%;
+	height: 2px;
+	background: var(--line2);
+}
+.wf-connector-passed {
+	background: var(--acc);
+}
+.wf-arc {
+	position: absolute;
+	z-index: -1;
+	border: 1.5px solid var(--line2);
+	border-bottom: none;
+	border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+	color: var(--muted);
+	pointer-events: none;
+}
+.wf-arc > span {
+	position: absolute;
+	top: -8px;
+	left: 50%;
+	transform: translateX(-50%);
+	padding: 0 4px;
+	background: var(--card);
+	font-size: 11px;
+	white-space: nowrap;
+}
+.wf-arc::after {
+	content: "";
+	position: absolute;
+	bottom: 0;
+	left: -4px;
+	border-left: 3px solid transparent;
+	border-right: 3px solid transparent;
+	border-top: 4px solid var(--line2);
+}
+.wf-arc-failed {
+	border-color: var(--bad);
+	color: var(--bad);
+}
+.wf-arc-failed::after {
+	border-top-color: var(--bad);
+}
+@media (max-width: 999px) {
+	.wf-columns {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.wf-panel {
+		width: 100%;
+	}
+}
+@media (max-width: 599px) {
+	.wf-editor {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.wf-variable {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

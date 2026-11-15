@@ -63,7 +63,7 @@ export interface RunResult {
 
 const INVALID_HELP = "Write the call again in exactly this form:\n@tool name\nkey: value\n---\ntext (only if the tool takes it)\n@end";
 
-function toAgentTool(spec: ToolSpec, ctx: ToolContext): AgentTool {
+export function toAgentTool(spec: ToolSpec, ctx: ToolContext): AgentTool {
 	const props: Record<string, any> = {};
 	for (const arg of spec.args) {
 		const base = arg.type === "number" ? Type.Number() : Type.String();
@@ -87,7 +87,7 @@ function toAgentTool(spec: ToolSpec, ctx: ToolContext): AgentTool {
 }
 
 /** Stands in for a tool call the model wrote wrongly, so it gets a clear error and tries again. */
-const invalidTool: AgentTool = {
+export const invalidTool: AgentTool = {
 	name: INVALID_CALL,
 	label: INVALID_CALL,
 	description: "Internal: reports a tool call that could not be read.",
@@ -104,12 +104,17 @@ function short(text: string, max = 110): string {
 	return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+/** Reads an agent folder and builds its system prompt. */
+export async function loadAgent(agentDir: string): Promise<{ agentFile: AgentFile; specs: ToolSpec[]; systemPrompt: string }> {
+	const agentFile = JSON.parse(await readFile(path.join(agentDir, "agent.json"), "utf8")) as AgentFile;
+	const prompt = (await readFile(path.join(agentDir, "prompt.md"), "utf8")).trim();
+	const specs = pickTools(agentFile.tools);
+	return { agentFile, specs, systemPrompt: `${prompt}\n\n${renderToolHelp(specs)}` };
+}
+
 export async function runAgent(options: RunOptions): Promise<RunResult> {
 	const started = Date.now();
-	const agentFile = JSON.parse(await readFile(path.join(options.agentDir, "agent.json"), "utf8")) as AgentFile;
-	const prompt = (await readFile(path.join(options.agentDir, "prompt.md"), "utf8")).trim();
-	const specs = pickTools(agentFile.tools);
-	const systemPrompt = `${prompt}\n\n${renderToolHelp(specs)}`;
+	const { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir);
 
 	const trace = createTrace(options.runsDir, path.basename(options.agentDir));
 	const ctx: ToolContext = { workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
