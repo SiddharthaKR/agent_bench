@@ -1,4 +1,4 @@
-import { SAVE_REMINDER } from "../src/agent.ts";
+import { FINAL_CHECK_FAILED, SAVE_REMINDER } from "../src/agent.ts";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -98,6 +98,42 @@ describe("runAgent with a scripted model", () => {
 		expect(result.modelCalls).toBe(2);
 		expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: "user", content: SAVE_REMINDER });
 		expect(await traceEvents(result.traceDir)).toContainEqual(expect.objectContaining({ type: "guard", reason: expect.stringContaining("nothing is saved") }));
+	});
+
+	it("compiles changed Verilog before the run may end and hands back a failure", async () => {
+		let compiles = 0;
+		const exec: Exec = async () => {
+			compiles++;
+			return compiles === 1
+				? { code: 1, stdout: "", stderr: "a.v:1: syntax error\n", timedOut: false, notFound: false }
+				: { code: 0, stdout: "", stderr: "", timedOut: false, notFound: false };
+		};
+		const model = fakeModel([
+			"@tool write_file\npath: a.v\n---\nmodule a endmodule\n@end",
+			"Done.",
+			"@tool write_file\npath: a.v\n---\nmodule a; endmodule\n@end",
+			"Fixed.",
+		]);
+		const result = await run(model, exec);
+		expect(result.reason).toBe("done");
+		expect(result.modelCalls).toBe(4);
+		expect(String(model.requests[2]!.messages.at(-1)!.content)).toContain(FINAL_CHECK_FAILED);
+		expect(String(model.requests[2]!.messages.at(-1)!.content)).toContain("syntax error");
+		expect(compiles).toBe(2);
+		const events = await traceEvents(result.traceDir);
+		expect(events).toContainEqual(expect.objectContaining({ type: "guard", reason: expect.stringContaining("Final check: compile a.v: failed") }));
+		expect(events).toContainEqual(expect.objectContaining({ type: "guard", reason: expect.stringContaining("Final check: compile a.v: ok") }));
+	});
+
+	it("does not run the final check when the model compiled its last change, or changed no Verilog", async () => {
+		let compiles = 0;
+		const exec: Exec = async () => { compiles++; return { code: 0, stdout: "", stderr: "", timedOut: false, notFound: false }; };
+		const compiled = fakeModel(["@tool write_file\npath: a.v\n---\nmodule a; endmodule\n@end", "@tool compile\nfiles: a.v\n@end", "Done."]);
+		expect((await run(compiled, exec)).modelCalls).toBe(3);
+		expect(compiles).toBe(1);
+		const notes = fakeModel(["@tool write_file\npath: notes.md\n---\nhello\n@end", "Done."]);
+		expect((await run(notes, exec)).modelCalls).toBe(2);
+		expect(compiles).toBe(1);
 	});
 
 	it("does not remind after a successful write or a plain answer", async () => {

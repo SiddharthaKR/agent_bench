@@ -177,7 +177,15 @@ The improvement loop: measure on a tuning set, read the failed runs, make a gene
 | a709768 (design-first prompt only) | 19 of 39 (49%) | 64 | 12 | Still wrote testbenches on harder problems and damaged correct designs |
 | d3f34dc (harness refuses a testbench the task does not ask for) | **24 of 39 (62%)** | **17** | 0 | 13 wrong output, 1 compile error, 1 judge error |
 
+| d3f34dc, thinking **on** | 22 of 39 (56%) | 28 | 1 | No gain from thinking on first-shot design, about 60% slower; thinking off stays the default |
+| ce113d7 (interface check reads bullet-list ports; rules: exact ports, concatenation order) | 25 of 39 (64%) | 15 | 0 | No compile error at the judge any more |
+| dba1fbf (state-machine method in `reset-and-state`, offered by default) | **26 of 39 (67%)** | 17 | 0 | 10 wrong output, 1 compile error, 1 no file, 1 judge error (runner mislabels a mismatch) |
+
+Each step up of one or two problems is within run-to-run variation; the trend over five runs and the sixfold speed gain are not.
+
 Tuning set with d3f34dc, `fpga-fast`, two runs each: gain 2 of 2, counter 2 of 2, fir4 2 of 2.
+
+Old harness easy with dba1fbf, single agent, three runs: 0 of 3, but for a new reason. The model went through design, generated testbench, checks and report in about 80 s and **never compiled**; the judge got a file with errors. Fix: before a run may end, the harness compiles the Verilog files changed since their last compile and hands a failure back to the model (up to two rounds).
 
 Owner's steer (2026-11-15): help the testbench writer, but the testbench matters little when the RTL is right. Built for that: `tb_skeleton` (generates a compiling testbench from the design's ports), `tb_checks` (fills only the checks), testbench hints, the design protected during the testbench step, and the rule above.
 

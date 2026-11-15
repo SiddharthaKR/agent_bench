@@ -101,6 +101,9 @@ const INVALID_HELP = "Write the call again in exactly this form:\n@tool name\nke
 
 export const SAVE_REMINDER = "You put code in your reply, but nothing is saved. Save it with write_file, then test it. Reply with only a tool block: the line @tool write_file, a path: line, a --- line, the whole file, and @end.";
 
+/** Sent when a run wants to end but the Verilog it changed does not compile. */
+export const FINAL_CHECK_FAILED = "You finished, but the files you changed do not compile. Fix every error, then run compile again before you finish.";
+
 export function hasUnsavedCode(message: AssistantMessage): boolean {
 	if (message.stopReason === "error" || message.stopReason === "aborted" || message.content.some((block) => block.type === "toolCall")) return false;
 	const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
@@ -215,6 +218,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		let lastPromptTokens = 0;
 		let outputTokens = 0;
 		let saved = false;
+		let lastArgs: Record<string, unknown> = {};
+		const uncompiled = new Set<string>();
+		const touched = new Set<string>();
 		let reminded = 0;
 		const say = options.onStep ?? (() => {});
 
@@ -273,6 +279,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 					agent.followUp({ role: "user", content: SAVE_REMINDER, timestamp: Date.now() });
 				}
 			} else if (event.type === "tool_execution_start") {
+				lastArgs = (event.args ?? {}) as Record<string, unknown>;
 				const { content, raw, ...rest } = (event.args ?? {}) as Record<string, unknown>;
 				trace.write({
 					type: "tool_call",
@@ -284,6 +291,14 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 				const text: string = event.result?.content?.[0]?.text ?? "";
 				toolCalls++;
 				if (!event.isError && ["write_file", "replace_lines"].includes(event.toolName)) saved = true;
+				// Verilog files changed since they last compiled; checked before the run may end.
+				if (!event.isError && ["write_file", "replace_lines", "tb_skeleton", "tb_checks"].includes(event.toolName)) {
+					const file = String(lastArgs.path ?? "").replace(/\\/g, "/");
+					if (/\.(?:v|sv|vh|svh)$/i.test(file)) { uncompiled.add(file); touched.add(file); }
+				}
+				if (!event.isError && ["compile", "run_sim"].includes(event.toolName)) {
+					for (const file of String(lastArgs.files ?? "").split(/\s+/).filter(Boolean)) uncompiled.delete(file.replace(/\\/g, "/"));
+				}
 				if (event.toolName === INVALID_CALL) invalidCalls++;
 				else if (event.isError) toolErrors++;
 				trace.write({ type: "tool_result", tool: event.toolName, ok: !event.isError, ms: event.durationMs ?? 0, text });
@@ -298,6 +313,18 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		let error: string | undefined;
 		try {
 			if (!options.signal?.aborted) await agent.prompt(options.task);
+			// A run may not end on Verilog that was never compiled: the harness compiles it and hands back a failure.
+			const compileSpec = specs.find((spec) => spec.name === "compile");
+			for (let round = 0; compileSpec && round < 2; round++) {
+				const lastReply = [...agent.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
+				if (uncompiled.size === 0 || timedOut || stoppedBy || options.signal?.aborted || lastReply?.stopReason !== "stop") break;
+				const files = [...touched].join(" ");
+				const checked = await compileSpec.run({ files }, ctx);
+				trace.write({ type: "guard", reason: `Final check: compile ${files}: ${checked.ok ? "ok" : "failed"}`, stop: false });
+				say(`     final check: compile ${files} ${checked.ok ? "✓" : "✗"}`);
+				if (checked.ok) { uncompiled.clear(); break; }
+				await agent.prompt(`${FINAL_CHECK_FAILED}\n${checked.text}`);
+			}
 		} catch (thrown) {
 			error = (thrown as Error).message;
 		} finally {
