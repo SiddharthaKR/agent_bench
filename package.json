@@ -9,6 +9,7 @@
 	},
 	"scripts": {
 		"agent": "tsx src/cli.ts",
+		"workflow": "tsx src/cli-workflow.ts",
 		"app": "tsx src/server/main.ts",
 		"web:install": "npm --prefix web install",
 		"web:build": "npm --prefix web run build",

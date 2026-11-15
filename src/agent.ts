@@ -9,6 +9,9 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { LoopGuard } from "./guard.ts";
+import { trimContext } from "./context.ts";
+import { loadSkills, skillTool } from "./skills.ts";
+import { smallFileRefusal } from "./tools/edit_policy.ts";
 import type { ServerConfig } from "./model.ts";
 import { createStreamFn, makeModel } from "./model.ts";
 import { INVALID_CALL, renderToolHelp } from "./protocol.ts";
@@ -20,6 +23,10 @@ export interface AgentFile {
 	name: string;
 	tools: string[];
 	maxTurns?: number;
+	skills?: string[];
+	smallFileLines?: number;
+	trimContext?: boolean;
+	maxSeconds?: number;
 }
 
 export interface RunOptions {
@@ -37,9 +44,10 @@ export interface RunOptions {
 	/** Called with one short line per step, for the console. */
 	onStep?: (line: string) => void;
 	signal?: AbortSignal;
+	maxSeconds?: number;
 }
 
-export type EndReason = "done" | "loop" | "limit" | "error" | "aborted";
+export type EndReason = "done" | "loop" | "limit" | "error" | "aborted" | "time";
 
 export interface RunResult {
 	reason: EndReason;
@@ -109,7 +117,12 @@ export async function loadAgent(agentDir: string): Promise<{ agentFile: AgentFil
 	const agentFile = JSON.parse(await readFile(path.join(agentDir, "agent.json"), "utf8")) as AgentFile;
 	const prompt = (await readFile(path.join(agentDir, "prompt.md"), "utf8")).trim();
 	const specs = pickTools(agentFile.tools);
-	return { agentFile, specs, systemPrompt: `${prompt}\n\n${renderToolHelp(specs)}` };
+	const skills = await loadSkills(agentDir, agentFile.skills);
+	const optional = skills.filter((skill) => !skill.always);
+	if (optional.length) specs.push(skillTool(optional));
+	const always = skills.filter((skill) => skill.always).map((skill) => `## ${skill.name}\n${skill.text}`);
+	const listing = optional.length ? `\n\nSkills you can load with use_skill:\n${optional.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n")}` : "";
+	return { agentFile, specs, systemPrompt: [prompt, ...always, renderToolHelp(specs)].join("\n\n") + listing };
 }
 
 export async function runAgent(options: RunOptions): Promise<RunResult> {
@@ -150,9 +163,18 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		},
 		streamFn: createStreamFn({ server: options.server, tools: specs, trace, fetchFn: options.fetchFn }),
 		toolExecution: "sequential",
+		transformContext: agentFile.trimContext === false ? undefined : async (messages) => trimContext(messages),
+		afterToolCall: async ({ toolCall, args, result, isError }) => {
+			const text = result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+			const hint = guard.noteResult({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> }, !isError, text);
+			return hint ? { content: [{ type: "text", text: `${text}\n${hint}` }, ...result.content.filter((block) => block.type !== "text")] } : undefined;
+		},
 		beforeToolCall: async ({ toolCall, args }) => {
 			const verdict = guard.check({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> });
-			if (verdict.allow) return undefined;
+			if (verdict.allow) {
+				const refusal = await smallFileRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx.workspace, agentFile.smallFileLines);
+				return refusal ? { block: true, reason: refusal } : undefined;
+			}
 			trace.write({ type: "guard", tool: toolCall.name, reason: verdict.reason, stop: verdict.stop });
 			say(`     guard: ${verdict.reason}`);
 			if (verdict.stop) stoppedBy = verdict.reason.includes("limit") ? "limit" : "loop";
@@ -185,21 +207,30 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		}
 	});
 
-	if (options.signal) options.signal.addEventListener("abort", () => agent.abort(), { once: true });
+	const abort = () => agent.abort();
+	options.signal?.addEventListener("abort", abort, { once: true });
+	const seconds = options.maxSeconds ?? agentFile.maxSeconds;
+	let timedOut = false;
+	const timer = seconds !== undefined ? setTimeout(() => { timedOut = true; agent.abort(); }, seconds * 1000) : undefined;
 
 	let error: string | undefined;
 	try {
 		await agent.prompt(options.task);
 	} catch (thrown) {
 		error = (thrown as Error).message;
+	} finally {
+		clearTimeout(timer);
+		options.signal?.removeEventListener("abort", abort);
 	}
 
-	const last = [...agent.state.messages].reverse().find((m) => m.role === "assistant") as AssistantMessage | undefined;
-	const finalText = last ? last.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim() : "";
+	const replies = [...agent.state.messages].reverse().filter((m): m is AssistantMessage => m.role === "assistant");
+	const last = replies[0];
+	const finalText = replies.map((message) => message.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim()).find(Boolean) ?? "";
 	if (last?.stopReason === "error") error = last.errorMessage ?? "Model error";
 
 	let reason: EndReason = "done";
-	if (options.signal?.aborted || last?.stopReason === "aborted") reason = "aborted";
+	if (timedOut) { reason = "time"; error = undefined; }
+	else if (options.signal?.aborted || last?.stopReason === "aborted") reason = "aborted";
 	else if (error) reason = "error";
 	else if (stoppedBy) reason = stoppedBy;
 

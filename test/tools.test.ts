@@ -58,6 +58,32 @@ const put = (rel: string, text: string) => fs.writeFile(path.join(ws, rel), text
 const get = (rel: string) => fs.readFile(path.join(ws, rel), "utf8");
 const numbers = (n: number) => Array.from({ length: n }, (_, i) => `line${i + 1}`).join("\n") + "\n";
 
+describe("compile hints", () => {
+	it("adds declaration advice only inside always, including nested blocks", async () => {
+		await put("a.v", "module a;\nalways @* begin\nif (1'b1) begin\nreg x;\nend\nend\nwire y;\nendmodule\n");
+		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:4: syntax error\na.v:7: syntax error" })]);
+		const result = await compile.run({ files: "a.v" }, ctx);
+		expect(result.text).toContain("4| reg x;\nHint: declare wires and regs at module level, not inside always.");
+		expect(result.text.match(/Hint:/g)).toHaveLength(1);
+	});
+	it.each([
+		["is not a valid l-value", "only a reg can be assigned in an always block; a wire needs assign."],
+		["Unable to bind wire/reg/memory", "this name is not declared in this module."],
+		["Syntax in assignment statement l-value", "check the line above for a missing semicolon or end."],
+	])("explains %s after the source line", async (message, hint) => {
+		await put("a.v", "broken;\n");
+		const { ctx } = fakeCtx([res({ code: 1, stderr: `a.v:1: ${message}` })]);
+		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain(`1| broken;\nHint: ${hint}`);
+	});
+	it("limits hints to two per result and ignores comments", async () => {
+		await put("a.v", "// always begin\nreg x;\nbad;\nbad;\n");
+		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:2: syntax error\na.v:2: is not a valid l-value\na.v:3: Unable to bind wire/reg/memory\na.v:4: Syntax in assignment statement l-value" })]);
+		const text = (await compile.run({ files: "a.v" }, ctx)).text;
+		expect(text).not.toContain("declare wires");
+		expect((text.match(/Hint:/g) ?? []).length).toBeLessThanOrEqual(2);
+	});
+});
+
 describe("resolveInWorkspace", () => {
 	it("resolves normal and nested paths", () => {
 		expect(resolveInWorkspace(ws, "a.v")).toMatchObject({ ok: true, rel: "a.v", abs: path.join(ws, "a.v") });

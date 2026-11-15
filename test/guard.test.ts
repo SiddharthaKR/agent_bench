@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { LoopGuard, signature } from "../src/guard.ts";
+
+describe("unchanged check results", () => {
+	it("tracks failures independently of calls and repeats the hint from the third failure", () => {
+		const guard = new LoopGuard();
+		const compile = { name: "compile", args: {} };
+		expect(guard.noteResult(compile, false, "broken")).toBeUndefined();
+		guard.noteResult({ name: "read_file", args: {} }, true, "file");
+		expect(guard.noteResult(compile, false, "broken")).toBeUndefined();
+		guard.noteResult({ name: "run_sim", args: {} }, false, "different");
+		expect(guard.noteResult(compile, false, "broken")).toContain("Same result 3 times.");
+		expect(guard.noteResult(compile, false, "broken")).toContain("write_file.");
+		expect(guard.noteResult(compile, false, "changed")).toBeUndefined();
+		guard.noteResult(compile, false, "changed");
+		expect(guard.noteResult(compile, true, "changed")).toBeUndefined();
+		expect(guard.noteResult(compile, false, "changed")).toBeUndefined();
+	});
+	it("uses configurable check names", () => {
+		const guard = new LoopGuard({ checkTools: ["lint"] });
+		for (let index = 0; index < 4; index++) expect(guard.noteResult({ name: "compile", args: {} }, false, "same")).toBeUndefined();
+		guard.noteResult({ name: "lint", args: {} }, false, "same");
+		guard.noteResult({ name: "lint", args: {} }, false, "same");
+		expect(guard.noteResult({ name: "lint", args: {} }, false, "same")).toContain("Same result");
+	});
+});
 import type { GuardCall } from "../src/types.ts";
 
 const call = (name: string, args: Record<string, string | number> = {}): GuardCall => ({ name, args });

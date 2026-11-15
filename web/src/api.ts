@@ -8,6 +8,7 @@ import type {
 	TreeNode,
 	Workflow,
 } from "../../src/shared/api.ts";
+import type { TraceDetail, TraceInfo } from "../../src/shared/trace.ts";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
 	const response = await fetch(url, {
@@ -23,6 +24,8 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 const q = (params: Record<string, string>) => new URLSearchParams(params).toString();
 
 export const api = {
+	traces: () => call<TraceInfo[]>("GET", "/api/traces"),
+	trace: (id: string) => call<TraceDetail>("GET", `/api/traces/${encodeURIComponent(id)}`),
 	config: () => call<AppConfig>("GET", "/api/config"),
 	tree: (folder: string) => call<TreeNode[]>("GET", `/api/tree?${q({ folder })}`),
 	readFile: (folder: string, path: string) => call<{ text: string }>("GET", `/api/file?${q({ folder, path })}`),

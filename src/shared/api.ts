@@ -123,6 +123,13 @@ export interface AgentStep extends StepBase {
 	agent: string;
 	/** May contain {task} and {name} placeholders for workflow variables. */
 	task: string;
+	/** Settings for this step only. Each one falls back to the agent's or the server's own value. */
+	model?: string;
+	temperature?: number;
+	/** Most tool calls this step may make. */
+	maxTurns?: number;
+	/** Tool names this step may use; a subset of the agent's tools. */
+	tools?: string[];
 }
 
 /** A program runs; no model. Passes on exit code 0 with no failure line in its output. */

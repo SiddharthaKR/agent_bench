@@ -5,6 +5,7 @@ export interface GuardOptions {
 	maxRepeats?: number;
 	maxBlocks?: number;
 	maxCalls?: number;
+	checkTools?: string[];
 }
 
 const LONG_VALUE = 200;
@@ -30,11 +31,23 @@ export class LoopGuard {
 	private readonly maxCalls: number;
 	private readonly history: string[] = [];
 	private blockedCount = 0;
+	private readonly checkTools: Set<string>;
+	private readonly results = new Map<string, { text: string; count: number }>();
 
 	constructor(options: GuardOptions = {}) {
 		this.maxRepeats = options.maxRepeats ?? 2;
 		this.maxBlocks = options.maxBlocks ?? 3;
 		this.maxCalls = options.maxCalls ?? 40;
+		this.checkTools = new Set(options.checkTools ?? ["compile", "run_sim"]);
+	}
+
+	noteResult(call: GuardCall, ok: boolean, text: string): string | undefined {
+		if (!this.checkTools.has(call.name)) return undefined;
+		const previous = this.results.get(call.name);
+		const count = !ok && previous?.text === text ? previous.count + 1 : !ok ? 1 : 0;
+		this.results.set(call.name, { text, count });
+		if (count >= 3) return "Same result 3 times. Your edits are not fixing it. Read the whole file, then rewrite it completely with write_file.";
+		return undefined;
 	}
 
 	/** Call BEFORE running a tool. Records the call when it is allowed. */

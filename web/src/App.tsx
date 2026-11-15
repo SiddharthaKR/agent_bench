@@ -3,6 +3,7 @@ import type { AppConfig } from "../../src/shared/api.ts";
 import { api } from "./api.ts";
 import { WorkScreen } from "./work/WorkScreen.tsx";
 import { WorkflowsScreen } from "./workflows/WorkflowsScreen.tsx";
+import { TraceScreen } from "./trace/TraceScreen.tsx";
 
 /** What every screen is given: the configuration and the user's current choices. */
 export interface ScreenProps {
@@ -16,7 +17,7 @@ export interface ScreenProps {
 	setFolder: (folder: string) => void;
 }
 
-type View = "work" | "workflows";
+type View = "work" | "workflows" | "trace";
 
 function stored(key: string, fallback: string): string {
 	try {
@@ -37,7 +38,10 @@ function store(key: string, value: string) {
 export function App() {
 	const [config, setConfig] = useState<AppConfig | null>(null);
 	const [error, setError] = useState("");
-	const [view, setView] = useState<View>(() => (stored("ab.view", "work") === "workflows" ? "workflows" : "work"));
+	const [view, setView] = useState<View>(() => {
+		const saved = stored("ab.view", "work");
+		return saved === "workflows" || saved === "trace" ? saved : "work";
+	});
 	const [dark, setDark] = useState(() => stored("ab.theme", "light") === "dark");
 	const [agent, setAgent] = useState(() => stored("ab.agent", ""));
 	const [server, setServer] = useState(() => stored("ab.server", ""));
@@ -85,6 +89,9 @@ export function App() {
 					<button type="button" className="btn" aria-pressed={view === "workflows"} onClick={() => go("workflows")}>
 						Workflows
 					</button>
+					<button type="button" className="btn" aria-pressed={view === "trace"} onClick={() => go("trace")}>
+						Trace
+					</button>
 				</nav>
 				<div className="spacer" />
 				<label className="check">
@@ -127,12 +134,15 @@ export function App() {
 				</button>
 			</header>
 			<main className="screen">
-				{/* Both screens stay mounted so a running session or workflow survives a tab switch. */}
+				{/* Screens stay mounted so a running session or workflow survives a tab switch. */}
 				<div hidden={view !== "work"} style={{ height: "100%" }}>
 					<WorkScreen {...props} />
 				</div>
 				<div hidden={view !== "workflows"} style={{ height: "100%" }}>
 					<WorkflowsScreen {...props} />
+				</div>
+				<div hidden={view !== "trace"} style={{ height: "100%" }}>
+					<TraceScreen {...props} />
 				</div>
 			</main>
 		</div>

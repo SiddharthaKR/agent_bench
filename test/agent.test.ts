@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runAgent } from "../src/agent.ts";
 import type { ChatMessage } from "../src/model.ts";
 import type { Exec, ExecResult } from "../src/types.ts";
@@ -66,6 +66,98 @@ async function traceEvents(dir: string) {
 }
 
 describe("runAgent with a scripted model", () => {
+	it("refuses small range edits but allows whole-file rewrites", async () => {
+		await writeFile(path.join(workspace, "a.v"), "old\n");
+		const model = fakeModel(["@tool replace_lines\npath: a.v\nfrom: 1\nto: 1\n---\nwrong\n@end", "@tool write_file\npath: a.v\n---\nnew\n@end", "Done."]);
+		const result = await run(model);
+		expect(result.toolErrors).toBe(1);
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("a.v has 1 lines. For a file this small, read it and rewrite the whole file with write_file.");
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toBe("new\n");
+	});
+
+	it("loads an optional skill as an ordinary read tool", async () => {
+		await mkdir(path.join(agentDir, "skills"));
+		await writeFile(path.join(agentDir, "skills", "math.md"), "---\nname: math\ndescription: Signed math\nalways: false\n---\nWiden first.");
+		const model = fakeModel(["@tool use_skill\nname: math\n@end", "Read it."]);
+		const result = await run(model);
+		expect(result.toolErrors).toBe(0);
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("Widen first.");
+	});
+
+	it("appends unchanged failure hints through the afterToolCall hook", async () => {
+		await writeFile(path.join(workspace, "a.v"), "module a endmodule\n");
+		const model = fakeModel([
+			"@tool compile\nfiles: a.v\n@end", "@tool read_file\npath: a.v\n@end",
+			"@tool compile\nfiles: a.v\n@end", "@tool read_file\npath: a.v\nfrom: 1\n@end",
+			"@tool compile\nfiles: a.v\n@end", "Done.",
+		]);
+		const failing: Exec = async () => ({ code: 1, stderr: "a.v:1: syntax error", stdout: "", timedOut: false, notFound: false });
+		await run(model, failing);
+		expect(model.requests[5]!.messages.at(-1)!.content).toContain("Same result 3 times.");
+	});
+
+	it("trims older output in model requests and can disable trimming", async () => {
+		await writeFile(path.join(workspace, "long.md"), "first\nsecond\nthird\n" + "x".repeat(600));
+		for (const enabled of [true, false]) {
+			await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: ["read_file"], trimContext: enabled }));
+			const model = fakeModel(Array.from({ length: 6 }, (_, index) => `@tool read_file\npath: long.md\nfrom: ${index + 1}\n@end`).concat("Done."));
+			await run(model);
+			expect(model.requests.at(-1)!.messages.some((message) => message.content.includes("(older output trimmed)"))).toBe(enabled);
+		}
+	});
+
+	it("aborts a never-ending model at the option time limit, overriding the agent default", async () => {
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: [], maxSeconds: 600 }));
+		let reached!: () => void;
+		const started = new Promise<void>((resolve) => { reached = resolve; });
+		const fetchFn: typeof fetch = async (_url, init) => new Promise<Response>((_resolve, reject) => {
+			reached();
+			init?.signal?.addEventListener("abort", () => reject(new Error("Stopped")), { once: true });
+		});
+		vi.useFakeTimers();
+		try {
+			const pending = runAgent({ agentDir, workspace, runsDir, task: "Wait", server: { baseUrl: "http://fake/v1", model: "fake" }, commands: { compile: [], simulate: [] }, fetchFn, maxSeconds: 2 });
+			await started;
+			await vi.advanceTimersByTimeAsync(2000);
+			const result = await pending;
+			expect(result.reason).toBe("time");
+			expect(result.error).toBeUndefined();
+			expect(vi.getTimerCount()).toBe(0);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it("clears the timer when the run finishes itself", async () => {
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: [], maxSeconds: 600 }));
+		vi.useFakeTimers();
+		try {
+			expect((await run(fakeModel(["Done."]))).reason).toBe("done");
+			expect(vi.getTimerCount()).toBe(0);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it("uses the agent time limit and keeps existing text when a later model call hangs", async () => {
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: ["read_file"], maxSeconds: 1 }));
+		await writeFile(path.join(workspace, "a.v"), "module a; endmodule\n");
+		let reached!: () => void;
+		const started = new Promise<void>((resolve) => { reached = resolve; });
+		let calls = 0;
+		const fetchFn: typeof fetch = async (_url, init) => {
+			if (++calls === 1) return new Response(JSON.stringify({ choices: [{ message: { content: "Preparing.\n@tool read_file\npath: a.v\n@end" }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } });
+			return new Promise<Response>((_resolve, reject) => {
+				reached();
+				init?.signal?.addEventListener("abort", () => reject(new Error("Stopped")), { once: true });
+			});
+		};
+		vi.useFakeTimers();
+		try {
+			const pending = runAgent({ agentDir, workspace, runsDir, task: "Wait", server: { baseUrl: "http://fake/v1", model: "fake" }, commands: { compile: [], simulate: [] }, fetchFn });
+			await started;
+			await vi.advanceTimersByTimeAsync(1000);
+			const result = await pending;
+			expect(result).toMatchObject({ reason: "time", finalText: "Preparing." });
+			expect(result.error).toBeUndefined();
+		} finally { vi.useRealTimers(); }
+	});
 	it("writes a file, compiles it, and finishes", async () => {
 		const model = fakeModel([
 			// No @end: the server cuts the reply at the stop sequence.

@@ -29,6 +29,8 @@ function parseArgs(argv: string[]): Record<string, string> {
 
 async function main(): Promise<number> {
 	const args = parseArgs(process.argv.slice(2));
+	const maxSeconds = args["max-seconds"] === undefined ? undefined : Number(args["max-seconds"]);
+	if (maxSeconds !== undefined && (!Number.isFinite(maxSeconds) || maxSeconds <= 0)) throw new Error("--max-seconds must be a positive number.");
 	if (!args.folder) throw new Error("Give the project folder with --folder <path>.");
 	const task = args["task-file"] ? (await readFile(args["task-file"], "utf8")).trim() : args.task;
 	if (!task) throw new Error('Give the task with --task "<text>" or --task-file <path>.');
@@ -56,12 +58,14 @@ async function main(): Promise<number> {
 		runsDir: args.runs ?? path.join(ROOT, "runs"),
 		onStep: (line) => console.log(line),
 		signal: controller.signal,
+		maxSeconds,
 	});
 
 	console.log("");
 	if (result.finalText) console.log(result.finalText);
 	console.log("");
-	console.log(`Ended: ${result.reason}${result.error ? ` (${result.error})` : ""}`);
+	const agentFile = JSON.parse(await readFile(path.join(ROOT, "agents", agentName, "agent.json"), "utf8")) as { maxSeconds?: number };
+	console.log(`Ended: ${result.reason}${result.reason === "time" ? ` (limit ${maxSeconds ?? agentFile.maxSeconds} s)` : result.error ? ` (${result.error})` : ""}`);
 	console.log(
 		`Model calls ${result.modelCalls} · tool calls ${result.toolCalls} · tool errors ${result.toolErrors} · unreadable calls ${result.invalidCalls} · blocked ${result.blocked}`,
 	);

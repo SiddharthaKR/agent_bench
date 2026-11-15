@@ -63,7 +63,7 @@ afterEach(async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-function open(model: ReturnType<typeof fakeModel>, askFirst: boolean) {
+function open(model: ReturnType<typeof fakeModel>, askFirst: boolean, exec: Exec = okExec) {
 	return createSession({
 		id: "s1",
 		agentDir: path.join(root, "agents", "fpga"),
@@ -72,7 +72,7 @@ function open(model: ReturnType<typeof fakeModel>, askFirst: boolean) {
 		commands: { compile: ["iverilog"], simulate: ["vvp"] },
 		runsDir: path.join(root, "runs"),
 		askFirst,
-		exec: okExec,
+		exec,
 		fetchFn: model.fetchFn,
 	});
 }
@@ -80,6 +80,47 @@ function open(model: ReturnType<typeof fakeModel>, askFirst: boolean) {
 const WRITE = "I will create the file.\n@tool write_file\npath: a.v\n---\nmodule a;\nendmodule\n@end";
 
 describe("session", () => {
+	it("appends unchanged check hints to both the model result and session event", async () => {
+		await writeFile(path.join(workspace, "a.v"), "module a endmodule\n");
+		const model = fakeModel([
+			"@tool compile\nfiles: a.v\n@end", "@tool read_file\npath: a.v\n@end",
+			"@tool compile\nfiles: a.v\n@end", "@tool read_file\npath: a.v\nfrom: 1\n@end",
+			"@tool compile\nfiles: a.v\n@end", "Done.",
+		]);
+		const exec: Exec = async () => ({ code: 1, stderr: "a.v:1: syntax error", stdout: "", timedOut: false, notFound: false });
+		const session = await open(model, false, exec);
+		const done = idleAfterWork(session);
+		session.send("Fix it.");
+		await done;
+		expect(model.requests[5]!.messages.at(-1)!.content).toContain("Same result 3 times.");
+		expect(session.events.some((event) => event.type === "step" && event.result.includes("Same result 3 times."))).toBe(true);
+	});
+
+	it("trims session history unless disabled", async () => {
+		await writeFile(path.join(workspace, "long.md"), "one\ntwo\nthree\n" + "x".repeat(600));
+		for (const enabled of [true, false]) {
+			await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Test", tools: ["read_file"], trimContext: enabled }));
+			const model = fakeModel(Array.from({ length: 6 }, (_, index) => `@tool read_file\npath: long.md\nfrom: ${index + 1}\n@end`).concat("Done."));
+			const session = await open(model, false);
+			const done = idleAfterWork(session);
+			session.send("Read it.");
+			await done;
+			expect(model.requests.at(-1)!.messages.some((message) => message.content.includes("(older output trimmed)"))).toBe(enabled);
+		}
+	});
+
+	it("uses skills without requesting edit approval", async () => {
+		const dir = path.join(root, "agents", "fpga", "skills");
+		await mkdir(dir);
+		await writeFile(path.join(dir, "math.md"), "---\nname: math\ndescription: Math rules\nalways: false\n---\nWiden first.");
+		const model = fakeModel(["@tool use_skill\nname: math\n@end", "Done."]);
+		const session = await open(model, true);
+		const done = idleAfterWork(session);
+		session.send("Read math.");
+		await done;
+		expect(session.events.some((event) => event.type === "proposal")).toBe(false);
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("Widen first.");
+	});
 	it("waits for the user before an edit, then writes the file when accepted", async () => {
 		const model = fakeModel([WRITE, "Created a.v."]);
 		const session = await open(model, true);
@@ -130,6 +171,7 @@ describe("session", () => {
 	});
 
 	it("applies edits at once when asking is off, and still shows what changed", async () => {
+		await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "FPGA agent", tools: ["replace_lines"], smallFileLines: 0 }));
 		await writeFile(path.join(workspace, "a.v"), "module a;\nwire x;\nendmodule\n");
 		const model = fakeModel(["@tool replace_lines\npath: a.v\nfrom: 2\nto: 2\n---\nwire y;\n@end", "Renamed the wire."]);
 		const session = await open(model, false);
@@ -146,6 +188,18 @@ describe("session", () => {
 			{ kind: "add", text: "wire y;", line: 2 },
 			{ kind: "same", text: "endmodule", line: 3 },
 		]);
+	});
+
+	it("refuses a small range edit before requesting approval", async () => {
+		await writeFile(path.join(workspace, "a.v"), "module a;\nendmodule\n");
+		const model = fakeModel(["@tool replace_lines\npath: a.v\nfrom: 1\nto: 1\n---\nmodule b;\n@end", "I will rewrite it."]);
+		const session = await open(model, true);
+		const done = idleAfterWork(session);
+		session.send("Change a.");
+		await done;
+		expect(session.events.some((event) => event.type === "proposal")).toBe(false);
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("a.v has 2 lines. For a file this small");
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toContain("module a;");
 	});
 
 	it("passes a message sent while it is working to the model as steering", async () => {

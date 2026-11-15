@@ -5,10 +5,13 @@ import type { CreateSessionRequest, RunWorkflowRequest, Workflow } from "../shar
 import { projectFolder, readTree, readText, writeText, serveStatic } from "./files.ts";
 import { booleanField, HttpError, readJson, record, sendJson, stringField } from "./responses.ts";
 import { streamEvents } from "./sse.ts";
+import { listTraces, readTrace } from "../traces.ts";
+import type { TraceInfo } from "../shared/trace.ts";
 
 export interface ServerOptions {
 	/** Folder holding the built browser app (index.html, assets). Optional. */
 	webDir?: string;
+	runsDirs?: string[];
 }
 
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -50,6 +53,23 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 		try { pathname = decodeURIComponent(rawUrl.split("?")[0] ?? "/"); }
 		catch { throw new HttpError(400, "Invalid URL."); }
 		const query = new URL(rawUrl, "http://localhost").searchParams;
+		if (pathname === "/api/traces") {
+			method(request, "GET");
+			const traces = new Map<string, TraceInfo>();
+			for (const dir of options.runsDirs ?? []) {
+				for (const info of await listTraces(dir)) if (!traces.has(info.id)) traces.set(info.id, info);
+			}
+			return sendJson(response, [...traces.values()].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.id.localeCompare(a.id)).slice(0, 200));
+		}
+		const traceRoute = /^\/api\/traces\/([^/]+)$/.exec(pathname);
+		if (traceRoute) {
+			method(request, "GET");
+			for (const dir of options.runsDirs ?? []) {
+				const detail = await readTrace(dir, traceRoute[1]!);
+				if (detail) return sendJson(response, detail);
+			}
+			throw new HttpError(404, "No such trace.");
+		}
 		if (pathname === "/api/config") {
 			method(request, "GET");
 			return sendJson(response, await engine.config());

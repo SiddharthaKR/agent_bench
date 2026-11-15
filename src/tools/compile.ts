@@ -87,6 +87,7 @@ async function withSource(messages: string[], rels: string[], workspace: string)
 	const out: string[] = [];
 	const seen = new Set<string>();
 	const cache = new Map<string, string[]>();
+	let hints = 0;
 	for (const message of messages) {
 		out.push(message);
 		const match = /^(.+?):(\d+):/.exec(message);
@@ -108,8 +109,37 @@ async function withSource(messages: string[], rels: string[], workspace: string)
 		if (line === undefined || line.trim() === "") continue;
 		seen.add(key);
 		out.push(`    ${lineNo}| ${trimLine(line)}`);
+		const hint = compileHint(message, line, source.slice(0, lineNo).join("\n"));
+		if (hint && hints < 2) {
+			out.push(`Hint: ${hint}`);
+			hints++;
+		}
 	}
 	return out;
+}
+
+function compileHint(message: string, line: string, prefix: string): string | undefined {
+	const rules: [RegExp, string][] = [
+		[/is not a valid l-value/i, "only a reg can be assigned in an always block; a wire needs assign."],
+		[/Unable to bind wire\/reg\/memory/i, "this name is not declared in this module."],
+		[/Syntax in assignment statement l-value/i, "check the line above for a missing semicolon or end."],
+	];
+	for (const [pattern, hint] of rules) if (pattern.test(message)) return hint;
+	if (/syntax error/i.test(message) && /\b(?:reg|wire)\s/.test(line) && insideAlways(prefix)) return "declare wires and regs at module level, not inside always.";
+	return undefined;
+}
+
+function insideAlways(text: string): boolean {
+	const clean = text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ").replace(/"(?:\\.|[^"\\])*"/g, " ");
+	let active = false;
+	let depth = 0;
+	for (const token of clean.match(/\balways\b|\bbegin\b|\bend\b|;/g) ?? []) {
+		if (token === "always") { active = true; depth = 0; }
+		else if (active && token === "begin") depth++;
+		else if (active && token === "end" && --depth <= 0) active = false;
+		else if (active && token === ";" && depth === 0) active = false;
+	}
+	return active;
 }
 
 export const compile: ToolSpec = {

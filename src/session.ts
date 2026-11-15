@@ -10,6 +10,8 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { invalidTool, loadAgent, toAgentTool } from "./agent.ts";
 import { lineDiff } from "./diff.ts";
 import { LoopGuard } from "./guard.ts";
+import { trimContext } from "./context.ts";
+import { smallFileRefusal } from "./tools/edit_policy.ts";
 import type { ServerConfig } from "./model.ts";
 import { createStreamFn, makeModel } from "./model.ts";
 import { INVALID_CALL, renderCall } from "./protocol.ts";
@@ -133,6 +135,12 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 			onDelta: (kind, delta) => emit({ type: "stream", kind, delta }),
 		}),
 		toolExecution: "sequential",
+		transformContext: agentFile.trimContext === false ? undefined : async (messages) => trimContext(messages),
+		afterToolCall: async ({ toolCall, args, result, isError }) => {
+			const text = result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+			const hint = guard.noteResult({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> }, !isError, text);
+			return hint ? { content: [{ type: "text", text: `${text}\n${hint}` }, ...result.content.filter((block) => block.type !== "text")] } : undefined;
+		},
 		beforeToolCall: async ({ toolCall, args }) => {
 			const typed = (args ?? {}) as Record<string, string | number>;
 			const verdict = guard.check({ name: toolCall.name, args: typed });
@@ -140,6 +148,11 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 				refused.set(toolCall.id, "blocked");
 				trace.write({ type: "guard", tool: toolCall.name, reason: verdict.reason });
 				return { block: true, reason: verdict.reason, terminate: verdict.stop };
+			}
+			const refusal = await smallFileRefusal(toolCall.name, typed, ctx.workspace, agentFile.smallFileLines);
+			if (refusal) {
+				refused.set(toolCall.id, "blocked");
+				return { block: true, reason: refusal };
 			}
 			if (!EDIT_TOOLS.has(toolCall.name)) return undefined;
 			const preview = await previewEdit(toolCall.name, typed, ctx.workspace);
@@ -227,10 +240,17 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 		busy = true;
 		guard = new LoopGuard({ maxCalls: agentFile.maxTurns ?? 40 });
 		emit({ type: "status", state: "working" });
+		const timer = agentFile.maxSeconds !== undefined ? setTimeout(() => {
+			for (const resolve of waiting.values()) resolve(false);
+			agent.abort();
+			note(`Ended: time (limit ${agentFile.maxSeconds} s)`);
+		}, agentFile.maxSeconds * 1000) : undefined;
 		try {
 			await agent.prompt(text);
 		} catch (error) {
 			note((error as Error).message, "bad");
+		} finally {
+			clearTimeout(timer);
 		}
 		busy = false;
 		if (guard.blocked > 0 && guard.allowed >= (agentFile.maxTurns ?? 40)) note(`Stopped after ${guard.allowed} tool calls. Tell the agent how to continue.`, "bad");
