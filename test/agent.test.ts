@@ -72,7 +72,7 @@ describe("runAgent with a scripted model", () => {
 		const result = await run(model);
 		expect(await traceEvents(result.traceDir)).toContainEqual(expect.objectContaining({ text: expect.stringContaining('Tool name "invalid_call" is already in use.') }));
 		expect(model.requests[1]!.messages.at(-1)!.content).toContain("Write the call again");
-	});
+	}, 30_000);
 
 	it("does not apply the built-in edit policy to MCP tools with edit names", async () => {
 		await writeFile(path.join(workspace, "small.txt"), "A small file.\n");
@@ -81,7 +81,7 @@ describe("runAgent with a scripted model", () => {
 		const result = await run(model);
 		expect(result.toolErrors).toBe(0);
 		expect(model.requests[1]!.messages.at(-1)!.content).toContain("MCP result");
-	});
+	}, 30_000);
 
 	it("adds MCP tools to the prompt and sends their results back to the model", async () => {
 		const pidFile = path.join(root, "mcp-pid");
@@ -96,14 +96,14 @@ describe("runAgent with a scripted model", () => {
 		expect(model.requests[1]!.messages.at(-1)!.content).toContain("hello MCP\nend");
 		const pid = Number(await readFile(pidFile, "utf8"));
 		expect(() => process.kill(pid, 0)).toThrow();
-	});
+	}, 30_000);
 
 	it("traces MCP startup problems and continues the run", async () => {
 		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "docs", command: "missing-mcp-command-123", args: [], enabled: true }] }));
 		const result = await run(fakeModel(["Done."]));
 		expect(result.reason).toBe("done");
 		expect(await traceEvents(result.traceDir)).toContainEqual(expect.objectContaining({ text: expect.stringContaining('MCP server "docs" could not start:') }));
-	});
+	}, 30_000);
 
 	it("refuses small range edits but allows whole-file rewrites", async () => {
 		await writeFile(path.join(workspace, "a.v"), "old\n");

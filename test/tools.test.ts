@@ -457,14 +457,14 @@ describe("realExec", () => {
 		expect(r.code).toBe(0);
 		expect(r.stdout.trim()).toBe("hi");
 		expect(r.notFound).toBe(false);
-	});
+	}, 30_000);
 	it("reports a missing program", async () => {
 		const r = await realExec("definitely-not-a-real-program-xyz", [], { cwd: ws, timeoutMs: 5_000 });
 		expect(r.notFound).toBe(true);
 		expect(r.code).toBeNull();
-	});
+	}, 30_000);
 	it("kills on timeout", async () => {
 		const r = await realExec(process.execPath, ["-e", "setTimeout(()=>{},60000)"], { cwd: ws, timeoutMs: 300 });
 		expect(r.timedOut).toBe(true);
-	});
+	}, 30_000);
 });

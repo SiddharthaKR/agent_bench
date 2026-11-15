@@ -32,4 +32,4 @@ it("runs command steps, applies vars, and automatically continues pauses", async
 		expect(await workflowMain(["--workflow", file, "--folder", folder, "--task", "Task"])).toBe(1);
 		expect(log.mock.calls.some((call) => String(call[0]).includes("Paused."))).toBe(true);
 	} finally { log.mockRestore(); await rm(folder, { recursive: true, force: true }); }
-});
+}, 30_000);

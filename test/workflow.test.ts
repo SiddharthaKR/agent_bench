@@ -30,6 +30,7 @@ function settle(run: WorkflowRun, action: () => void): Promise<void> {
 describe("workflow", () => {
 	it.each([false, true])("applies time limit precedence through real adapters (engine: %s)", async (engine) => {
 		const root = await mkdtemp(join(tmpdir(), "workflow-limits-"));
+		vi.useFakeTimers();
 		try {
 			await mkdir(join(root, "agents", "fpga"), { recursive: true });
 			await writeFile(join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Test", tools: ["read_file"], maxSeconds: 0.01 }));
@@ -38,7 +39,7 @@ describe("workflow", () => {
 			const bodies: Record<string, unknown>[] = [];
 			const fetchFn: typeof fetch = async (_url, init) => {
 				bodies.push(JSON.parse(String(init?.body)));
-				await new Promise((resolve) => setTimeout(resolve, 40));
+				await vi.advanceTimersByTimeAsync(40);
 				return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Done" }, finish_reason: "stop" }] }));
 			};
 			for (const [stepSeconds, runSeconds, expected] of [[undefined, undefined, "failed"], [undefined, 1, "done"], [0.01, 1, "failed"], [1, 0.01, "done"]] as const) {
@@ -53,7 +54,7 @@ describe("workflow", () => {
 				expect(status).toBe(expected);
 			}
 			expect(bodies.at(-1)).toMatchObject({ a: 1, b: 3 });
-		} finally { await rm(root, { recursive: true, force: true }); }
+		} finally { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); }
 	});
 	it.each(["time", "turns"] as const)("lets checks decide after the %s limit", async (limit) => {
 		const d = deps({ runAgent: async () => ({ ok: false, text: "Stopped", limit }) });

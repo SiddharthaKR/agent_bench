@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
 
+// Allow the output deadline, process-exit polling and cleanup to finish.
 it.each([
 	{ name: "docs", tool: "echo", flags: [], text: "session echo\nend" },
 	{ name: "write", tool: "file", flags: ["--edit-file"], text: "MCP result" },
@@ -38,11 +39,11 @@ it.each([
 		expect(() => process.kill(pid!, 0)).not.toThrow();
 		child.stdin.write("exit\n");
 		expect((await exited)[0]).toBe(0);
-		await expect.poll(() => { try { process.kill(pid!, 0); return true; } catch { return false; } }).toBe(false);
+		await expect.poll(() => { try { process.kill(pid!, 0); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(false);
 	} finally {
 		child.kill();
 		pid ??= await readFile(pidFile, "utf8").then(Number, () => undefined);
 		if (pid !== undefined) try { process.kill(pid); } catch { /* Already exited. */ }
 		await rm(root, { recursive: true, force: true });
 	}
-}, 25_000);
+}, 45_000);

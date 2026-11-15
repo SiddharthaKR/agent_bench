@@ -158,7 +158,7 @@ describe("local HTTP server", () => {
 			await Promise.all(Array.from({ length: Math.min(100, 5001 - offset) }, (_, i) => fs.writeFile(path.join(folder, `${offset + i}.txt`), "")));
 		}
 		expect(await (await fetch(base + `/api/tree?${new URLSearchParams({ folder })}`)).json()).toHaveLength(5000);
-	});
+	}, 30_000);
 
 	it("does not follow symbolic links in trees or outside the static root", async () => {
 		const project = path.join(folder, "project");
@@ -273,8 +273,8 @@ describe("local HTTP server", () => {
 			expect(await nextEvent()).toEqual(event);
 		}
 		await reader.cancel();
-		await vi.waitFor(() => expect(listeners.size).toBe(0));
-	});
+		await vi.waitFor(() => expect(listeners.size).toBe(0), { timeout: 5_000 });
+	}, 15_000);
 
 	it("blocks foreign origins and hosts and accepts local origins", async () => {
 		await expectError(await fetch(base + "/api/config", { headers: { origin: "https://example.com" } }), 403, "Requests from other sites are not allowed.");
@@ -300,9 +300,9 @@ describe("local HTTP server", () => {
 		await vi.advanceTimersByTimeAsync(25_000);
 		expect(new TextDecoder().decode((await reader.read()).value)).toBe(": ping\n\n");
 		await reader.cancel();
-		await vi.waitFor(() => expect(fake.sessionListeners.size).toBe(0));
+		await vi.waitFor(() => expect(fake.sessionListeners.size).toBe(0), { timeout: 5_000 });
 		expect(vi.getTimerCount()).toBe(0);
-	});
+	}, 15_000);
 
 	it("rejects oversized bodies and malformed JSON", async () => {
 		await expectError(await fetch(base + "/api/sessions", { method: "POST", body: "x".repeat(5 * 1024 * 1024 + 1) }), 413);

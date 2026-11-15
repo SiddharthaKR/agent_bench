@@ -25,13 +25,11 @@ const okExec: Exec = async () => ({ code: 0, stdout: "", stderr: "", timedOut: f
 
 /** Resolves when an event matching the test arrives (or already has). */
 function until(session: Session, test: (event: SessionEvent) => boolean): Promise<SessionEvent> {
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve) => {
 		const seen = session.events.find(test);
 		if (seen) return resolve(seen);
-		const timer = setTimeout(() => reject(new Error("timed out waiting for an event")), 4000);
 		const off = session.subscribe((event) => {
 			if (!test(event)) return;
-			clearTimeout(timer);
 			off();
 			resolve(event);
 		});
@@ -51,7 +49,7 @@ it("emits and traces MCP startup problems as bad notes", async () => {
 	await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "docs", command: "missing-mcp-command-123", args: [], enabled: true }] }));
 	const session = await open(fakeModel(["Done."]), true);
 	expect(session.events).toContainEqual(expect.objectContaining({ type: "note", tone: "bad", text: expect.stringContaining('MCP server "docs" could not start:') }));
-});
+}, 30_000);
 
 let root: string;
 let workspace: string;

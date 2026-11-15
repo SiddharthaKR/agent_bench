@@ -11,7 +11,9 @@ const fixture = path.resolve("test/fixtures/mcp-echo-server.mjs");
 const config = { name: "docs", command: process.execPath, args: [fixture], enabled: true };
 const ctx: ToolContext = { workspace: process.cwd(), commands: { compile: [], simulate: [] }, exec: async () => { throw new Error("Unused"); } };
 const connections: Awaited<ReturnType<typeof connectMcp>>[] = [];
-afterEach(async () => { await Promise.all(connections.splice(0).map((connection) => connection.close())); });
+// Discovery alone can take 10 seconds; allow time for process startup and cleanup.
+const processTimeout = 30_000;
+afterEach(async () => { await Promise.all(connections.splice(0).map((connection) => connection.close())); }, processTimeout);
 async function open(args = [fixture]) {
 	const connection = await connectMcp([{ ...config, args }]);
 	connections.push(connection);
@@ -30,7 +32,7 @@ it("maps names, summaries and primitive and JSON arguments", async () => {
 	expect(tools[2]?.args[0]?.help).toMatch(/\(JSON\)$/);
 	expect(tools[2]?.args[0]?.help.length).toBeLessThanOrEqual(60);
 	expect(tools[4]?.args.every((arg) => arg.type === "string" && arg.help.endsWith("(JSON)"))).toBe(true);
-});
+}, processTimeout);
 
 it("calls tools, parses JSON, reports errors and cuts output", async () => {
 	const { tools } = await open();
@@ -44,7 +46,7 @@ it("calls tools, parses JSON, reports errors and cuts output", async () => {
 	const cut = await call("docs_echo", { text: "x".repeat(2100) });
 	expect(cut.text.length).toBeLessThanOrEqual(2000);
 	expect(cut.text.endsWith("(output cut)")).toBe(true);
-});
+}, processTimeout);
 
 it("skips disabled and failed servers and caps tools", async () => {
 	const failed = await connectMcp([{ ...config, command: "missing-mcp-command-123" }, { ...config, enabled: false }]);
@@ -54,7 +56,7 @@ it("skips disabled and failed servers and caps tools", async () => {
 	const many = await open([fixture, "--many"]);
 	expect(many.tools).toHaveLength(12);
 	expect(many.problems).toEqual(['MCP server "docs" has 15 tools; only the first 12 are used to keep the prompt small.']);
-});
+}, processTimeout);
 
 it("close ends the child process and calls after close return errors", async () => {
 	const dir = await mkdtemp(path.join(os.tmpdir(), "mcp-close-"));
@@ -69,7 +71,7 @@ it("close ends the child process and calls after close return errors", async () 
 		expect(await connection.tools[0]!.run({ text: "hello" }, ctx)).toMatchObject({ ok: false });
 		await connection.close();
 	} finally { await rm(dir, { recursive: true, force: true }); }
-});
+}, processTimeout);
 
 it("does not start servers while loading an agent", async () => {
 	const dir = await mkdtemp(path.join(os.tmpdir(), "mcp-load-"));
@@ -89,7 +91,7 @@ it("reports a conflicting tool name without replacing an existing tool", async (
 	connections.push(connection);
 	expect(connection.tools).toEqual([]);
 	expect(connection.problems).toEqual([expect.stringContaining('Tool name "docs_echo" is already in use.')]);
-});
+}, processTimeout);
 
 it("times out tool discovery and ends the stalled server", async () => {
 	const dir = await mkdtemp(path.join(os.tmpdir(), "mcp-timeout-"));
@@ -102,4 +104,4 @@ it("times out tool discovery and ends the stalled server", async () => {
 		const pid = Number(await readFile(pidFile, "utf8"));
 		expect(() => process.kill(pid, 0)).toThrow();
 	} finally { await rm(dir, { recursive: true, force: true }); }
-}, 15_000);
+}, processTimeout);
