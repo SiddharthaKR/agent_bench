@@ -98,6 +98,20 @@ Two more local tasks since commit 44c15ea, `fpga-fast` workflow:
 | `counter` (up/down counter with load and wrap flag) | easy | 3 of 3 | 14, 18, 50 s |
 | `fir4` (4-tap FIR, Q7 coefficients, saturation, valid) | medium | 2 of 3 | 63, 203 s; the failure used all three attempts (394 s) |
 
+After the prompt fix (a given testbench is the judge), protected files and three more hints:
+
+| Commit | Task | Setup | Passed | Time per run |
+|---|---|---|---|---|
+| f44f553 | gain | single agent, thinking off | 4 of 4 | 13, 18, 19, 24 s |
+| f44f553 | fir4 | `fpga-fast` workflow | 3 of 4 | 41, 147, 318 s |
+| f44f553 | fir4 | single agent, thinking off, 150 s | 2 of 3 | 36, 79 s |
+| 5c90232 | fir4 | `fpga-fast` workflow | **4 of 4** | 30, 35, 80, 138 s |
+| 5c90232 | gain | `fpga-fast` workflow | 3 of 3 | 13, 14, 74 s |
+| 5c90232 | counter | `fpga-fast` workflow | 3 of 3 | 11, 11, 15 s |
+| 5c90232 | counter | single agent, thinking off | 3 of 3 | 13, 13, 21 s |
+
+**Overfitting caution.** These three tasks are the tuning set: skills and hints were adjusted by reading their failures, the fixed-point skill's worked module is close to the gain task, and samples are 3 or 4 runs. A held-out set of six other tasks (`pwm`, `seqdet`, `regbank`, `fifo`, `accum`, `uart_tx`) is only measured, never tuned against; the old harness's easy and medium tasks with the hidden judge are the second independent check.
+
 What the traces of failed runs showed, and the fix for each (all 2026-11-15):
 - Retries never happened after a time-out. Fixed: time limit per agent step; a stopped step goes on to the checks.
 - Intermediate values registered, so the output was late. Fixed: latency rule, worked module in the fixed-point skill, "late output" hint.
