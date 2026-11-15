@@ -1,141 +1,119 @@
 # Agent Bench: plan and progress
 
-Last updated: 2026-11-14. "Agent Bench" is a working name.
+Last updated: 2026-11-15. "Agent Bench" is a working name. Read this file first in a new session.
 
 ## Goal
 
-A light app that lets local models (Gemma 4 and others, on LM Studio or Ollama) do real hardware coding: FPGA, DPU, GPU. The model's context is spent on the task, not on the harness. Linux is the target; development happens on the Windows PC and real-model runs happen on the office server.
+A light app that lets local models (Gemma 4 and others, on LM Studio or Ollama) do real hardware coding: FPGA, DPU, GPU. The model's context is spent on the task, not on the harness. It replaces opencode, which scored 0 of 16 on the old FPGA harness, mostly because of tool-call plumbing.
 
-It replaces opencode, which scored 0 of 16 on the FPGA harness. The failures there were mostly tool-call plumbing (lost `filePath`, exact-text edit loops, wasted context), not the model's coding ability.
+Linux is the target. Development happens on the Windows PC; the office server (172.20.1.126) runs it in development mode only: started by hand, no deployment.
+
+## Where things are
+
+- Repository: `C:\Users\siddh\Documents\Personal\Harness`, GitHub `SiddharthaKR/agent_bench`.
+- Branch `master`: milestone 0 only (pushed).
+- Branch `ui-work-workflows`: everything since (committed locally, **not pushed**).
+- Old harness with the hidden judges: `C:\Users\siddh\Documents\Personal\DUMP\ai_demo`. Never read or copy `harness/judge/` into anything an agent can see.
+- UI prototype (dummy data, the look to match): https://claude.ai/artifact/3H83kZxtnRrojfDDgahqYd
+
+## How the work is done
+
+- The owner holds design authority. Ask before guessing a design decision.
+- Codex (`codex exec -s workspace-write`) builds parts from written briefs in `briefs/`; each brief lists the files it may touch so parallel tasks do not collide. The result is then read, tested and checked in the browser before it is committed.
+- Scoring runs use a frozen copy of the code so later edits cannot disturb them.
+- Commits end with the Co-Authored-By line. Pushes need the owner's approval each time.
 
 ## Rules that keep it light
 
-1. Small fixed prompt. The system prompt plus tool instructions stay short and their size is recorded on every run.
-2. Few tools per agent (four to six), each with short output.
-3. No layers between the agent and the model. The app talks directly to the model server and reads tool calls from the model's text.
+1. Small fixed prompt; its size is shown on the Agents screen and recorded in every trace.
+2. Few tools per agent, each with short output.
+3. No layers between agent and model: plain chat to the model server, tool calls read from the model's text.
 4. Sub-agents work in a fresh context and return a short summary.
-5. Old tool output is trimmed from the context.
-6. A loop guard blocks repeated calls and repeating cycles before the tool runs.
+5. Old tool output and old file text are trimmed from the context.
+6. A loop guard blocks repeated calls and cycles, and notices a result that does not change.
 7. Pass or fail comes from a command's result, never from the agent saying "done".
-
-## Parts
-
-- **Engine** (`src/`): runs an agent from a folder, runs workflows, writes the trace. Usable from the command line and from code.
-- **Local server**: file tree, file read and write, session start, steer and stop, event stream to the browser.
-- **Browser app**: Work, Workflows, Trace and Agents screens. Lab (Results, hidden judge) sits behind one setting and is removed for the team version.
-
-Everything is customizable two ways: through the GUI, and through files and code. An agent is a folder (`agents/<name>/agent.json` and `prompt.md`). Workflows and skills will be files too, and a run is a function (`runAgent`) that scripts can call.
+8. A run has a time limit; an easy task must finish in a decent time or be retried.
 
 ## Decisions made
 
 | Topic | Decision |
 |---|---|
-| Repository | New and separate, at `Documents\Personal\Harness`. No code copied from learnharness (AGPL). |
-| Agent library | `@earendil-works/pi-agent-core` 1.4.0 (MIT) |
-| Browser framework | React with Vite |
-| How the model edits files | Whole-file write plus replace-by-line-range |
-| Approval default | Ask before edits and commands, switchable per agent |
-| Shell access | Named tools only; a general "run command" tool is opt-in per agent |
-| Orchestrator | Plain code runs workflow steps in order; the model is used only inside agent steps |
-| Bench | Removed as a screen. Lab is "run a workflow several times, score it with the hidden judges, list the results". |
-| Look | Minimal, using the learnharness colour scheme (near-white neutrals, one indigo accent, dark greys in dark theme, Inter) |
-| Way of working | Build on the Windows PC, verify with a scripted fake model and local Ollama models; the owner runs the server tests |
-
-## Workflow design (agreed)
-
-- A workflow is an ordered list of typed steps: an agent step or a command step.
-- Two fix loops. Inner: the agent fixes compile errors inside its own step. Outer: when a later check fails, the orchestrator restarts the fixing agent with a fresh context holding the spec, the current file, a short failure report and one line per earlier attempt.
-- Each step has an "on fail" rule (go back to step N, at most K rounds), then hands over to the user, who can steer, edit and resume from a step.
-- Settings live on the step: model, temperature, context limit, tool list, on-fail rule.
-- Each agent ships with a ready-made default workflow to copy and edit.
-- The format stays open for later step types (for example parallel candidates and a pick step). These are not built or shown now.
+| Agent library | `@earendil-works/pi-agent-core` 1.4.0 (MIT). No code from learnharness (AGPL). |
+| Browser app | React with Vite; CodeMirror editor; system fonts; the learnharness colour scheme |
+| Tool-call format | Plain lines (`@tool name`, `key: value`, `---`, text, `@end`), no JSON |
+| Edits | Whole-file write, plus replace-by-line-range for files over 150 lines |
+| Approval | Ask before edits by default; switch on the Work screen |
+| Shell access | Named tools only; no general "run command" tool yet |
+| Orchestrator | Plain code runs workflow steps; the model works only inside agent steps |
+| Customisation | Everything is files and code as well as GUI: `agents/<id>/`, `workflows/*.json`, `src/index.ts` |
+| Bench | No Bench screen. Lab = scored runs listed on the Results screen, behind the "Lab tools" switch |
+| Server | Development mode only (`docs/server.md`); no installer or service for now |
+| Settings | `config.json` is shared; `config.local.json` (not committed) holds per-machine values |
 
 ## Milestones
 
 | # | Milestone | Status |
 |---|---|---|
-| 0 | Command-line spike: FPGA agent, five tools, direct to the model server, trace to disk | **Built and verified locally. Server go or no-go run still to do.** |
-| 1 | Engine: sub-agents, both fix loops, workflow runner, context trimming, approval hook, per-step settings, code API | Not started |
-| 2 | Work screen: file tree, editor with autosave and Ctrl+S, change accept and reject, chat with stop and steer, dark theme | Not started |
-| 3 | Workflows screen with the graph | Not started |
-| 4 | Trace: click-to-expand thinking in chat, plus the full Trace screen | Not started |
-| 5 | Agents screen, per-step settings, MCP servers, DPU agent | Not started |
-| 6 | Lab results, then development mode on the server (docs/server.md); no deployment for now | Not started |
+| 0 | Command-line agent, five tools, trace to disk | Done. Server run with the 26B model still to do |
+| 1 | Engine: skills, context trimming, guards, time limit, sub-agents, workflow runner, per-step settings, code API | Built, tests pass |
+| 2 | Work screen: files, editor with autosave and Ctrl+S, change review, chat with stop and steer | Built, checked in the browser with local Gemma |
+| 3 | Workflows screen: step cards, graph, run controls | Built, checked in the browser |
+| 4 | Trace screen | Built, checked in the browser |
+| 5 | Agents screen; DPU and GPU agents; MCP servers | Screen and agents built and checked; **MCP in progress** |
+| 6 | Results (Lab), medium task, server development mode | Built; scripts not yet run end to end since the rewrite |
 
-Milestone 0 is the go or no-go point. If Gemma 4 26B still fails on the server with clean tool calls, the problem is the model or the prompts and the rest of the plan changes.
+## What exists (branch `ui-work-workflows`)
 
-## Milestone 0: what exists
+- **Engine** (`src/`): `agent.ts` (`runAgent`), `session.ts` (interactive chat with approvals and steering), `workflow.ts` (runner), `subagent.ts` (`ask_agent`), `skills.ts`, `context.ts` (trimming), `guard.ts`, `protocol.ts`, `model.ts` (streamed chat, extra request settings per server), `tools/`, `trace.ts`, `traces.ts`, `results.ts`, `config.ts`, `engine.ts`, `index.ts` (code API).
+- **Server** (`src/server/`): local HTTP server, 127.0.0.1 by default, `--host` to open it on a trusted network.
+- **Browser app** (`web/`): Work, Workflows, Trace, Agents, and Results (Lab).
+- **Agents** (`agents/`): `fpga` (two skills, sub-agents `testbench` and `verifier`), `dpu`, `gpu`.
+- **Workflows** (`workflows/`): `fpga-block.json` (write, compile, testbench, simulate) and `retry-until-pass.json` (write, check, retry with a fresh start).
+- **Command lines:** `npm run agent`, `npm run workflow`, `npm run app`, `npm run result`.
+- **Scoring:** `scripts/eval_local.sh` (local gain task) and `scripts/h_task.sh <ai_demo> <easy|medium>` (old harness with its hidden judge); results go to `runs/results.jsonl`.
+- **Docs:** `README.md`, `docs/server.md`, `examples/`.
+- **Tests:** 266 passing at the last full run (2026-11-15), type checks clean.
 
-- `src/protocol.ts`: the tool-call text format and its parser.
-- `src/model.ts`: talks to an OpenAI-compatible server with plain chat messages, streamed.
-- `src/tools/`: `read_file`, `write_file`, `replace_lines`, `compile`, `run_sim`.
-- `src/guard.ts`: loop guard. `src/trace.ts`: trace writer.
-- `src/agent.ts`: `runAgent`. `src/cli.ts`: command line.
-- `agents/fpga/`: the FPGA agent. `config.json`: model servers and compile commands. Temperature 0.2 is carried over from the old harness. `office-shim` points at the Gemma proxy on port 8088, as a fallback if LM Studio rejects plain chat.
-- `scripts/h_easy.sh` and `tasks/h-easy.md`: the test against the old harness, described below.
-- `test/`: 115 tests, all passing on 2026-11-14.
+## Accuracy of the small local model (Gemma 4 E4B on Ollama)
 
-Tool-call format (no JSON, so the model never escapes code):
+Task: write a saturating gain block and make a given testbench pass. Verdict from an independent check with the original testbench.
 
-```
-@tool write_file
-path: rtl/gain.v
----
-module gain;
-endmodule
-@end
-```
+| When | Setup | Passed |
+|---|---|---|
+| 2026-11-14 | Milestone 0 harness, 40-call limit | 0 of 2 |
+| 2026-11-15 | After the accuracy work, thinking on, 300 s | 2 of 3 |
+| 2026-11-15 | Same plus sub-agents and the fixed-point skill line, thinking on | 1 of 3 |
+| 2026-11-15 | Same, thinking off (`local-fast`) | 2 of 4 |
+| 2026-11-15 | Retry workflow, up to 3 fresh attempts, 150 s each | Running when this was written |
 
-### Verified on the Windows PC, 2026-11-14
+What changed the result:
+- Files under 150 lines are rewritten whole (before, stale line-range edits grew a file to 225 broken lines).
+- Context stays between 1.5k and 6.3k tokens (before, 15k to 28k).
+- The same failing result three times tells the model to re-read and rewrite.
+- A short always-on Verilog rules skill; a fixed-point skill loaded on request; hints under known compiler errors.
 
-- 115 of 115 tests pass, type check clean.
-- Real run with Gemma 4 E4B on Ollama and real Icarus Verilog: 41 model calls, 41 tool calls, 0 unreadable, 0 blocked. Starting context about 494 tokens.
-- That small model did not solve the test task (a saturating gain block) within the 40-call limit.
-- Qwen3 8B: not completed. One reply took over five minutes; not re-run after the streaming fix.
+What still fails on E4B: declarations inside `always` blocks (thinking off), an extra register that delays the output one cycle (thinking on), and long thinking that eats the time limit. Ollama accepts `reasoning_effort: "none"` to switch thinking off; `"low"` made no difference.
 
-### Found with the real model and fixed
+All numbers are for E4B. The real target, Gemma 4 26B on the server, has not been run with this harness.
 
-- The model copied an empty `---` onto calls that take no text. The instructions now show two real examples and an empty section is accepted.
-- A stop sequence cut the model off during its thinking and left an empty reply. The stop sequence is removed and an empty reply is never treated as finished.
-- Node drops a request after five minutes without a reply. Replies are now streamed.
-- A compile error now shows the offending source line.
+## Next steps
 
-### One-command test against the old harness
-
-`scripts/h_easy.sh` runs track H easy of the old FPGA harness (`ai_demo`) with this agent and scores it with that harness's hidden judge:
-
-```bash
-bash scripts/h_easy.sh <path to ai_demo> office <LM Studio model id>
-```
-
-It asks the old harness for a fresh workspace (`run_demo.sh --setup-only`, which replaces its workspace folder), runs the agent on `tasks/h-easy.md`, runs the hidden judge, and checks that no hidden file leaked. The result lines are `JUDGE: PASS|FAIL` and `LEAK CHECK: clean`. The trace is written into the old harness's run folder under `agent_bench/`.
-
-The task differs from the opencode version in one way: this agent has no Python or synthesis tool yet, so it checks itself with a hand-computed self-checking testbench. The judge is the same.
-
-The medium task uses `tasks/h-medium.md` to implement `red_pitaya_fir_block` from the FIR spec and bit-true Python model. Run `bash scripts/h_task.sh <path to ai_demo> medium office <model id>`; the same script accepts `easy`, `-n` repeats and `-t` seconds. Both levels record scores in `runs/results.jsonl` for the Lab Results screen.
-
-Dry run on the Windows PC with Gemma 4 E4B, 2026-11-14: the whole procedure worked; the agent used all 40 tool calls with 0 unreadable calls; the judge reported COMPILE_ERROR, so FAIL. Two weaknesses showed up, both for milestone 1:
-
-- The model repeated `replace_lines` on the same stale line range while the file kept growing. Different text each time, so the loop guard did not see a repeat.
-- The compile result was the same failure many times in a row. The guard should also notice a result that does not change.
-
-### Still to do for milestone 0
-
-- [x] First commit.
-- [ ] Get the repository onto the server (a remote, or a single-file copy).
-- [ ] Run `scripts/h_easy.sh` three times on the server with Gemma 4 26B. Compare with opencode's 0 of 16.
-- [ ] Check on the server: which effort or thinking setting Gemma 4 accepts on LM Studio, and whether it handles parallel requests.
+- [ ] Read the retry-workflow score; decide the default (single run or retry workflow) for easy tasks.
+- [ ] Check Codex task K (MCP servers), run all tests, look at the Agents screen's MCP card, commit.
+- [ ] Run `scripts/h_task.sh` for easy on this PC to confirm the rewrite works end to end.
+- [ ] Try the sub-agents and the code-API examples against the real model.
+- [ ] Owner: look at the screens at desktop size and say what to change in the look.
+- [ ] Owner: on the server, follow `docs/server.md`, then run `bash scripts/h_task.sh /path/to/ai_demo easy office <model id> -n 3` and the same with `medium`.
+- [ ] Push `ui-work-workflows` when the owner approves.
 
 ## Open points
 
-- The agent prompt (`agents/fpga/prompt.md`), the tool-call format and the limits (40 tool calls, block on the third repeat) were chosen during the spike and are the owner's to change.
-- Context grew from about 0.5k to 15k tokens over 41 calls. Trimming is milestone 1.
-- Whether Results should compare workflows instead of agent setups.
-- Per-step settings are not yet shown on the step cards in the UI prototype.
-
-## UI prototype
-
-A clickable prototype with dummy data shows the target screens: https://claude.ai/artifact/3H83kZxtnRrojfDDgahqYd (private to the owner). The real screens are built to match it.
+- The agent prompt, the tool-call format and the limits (40 tool calls, 150-line rule, time limits) were chosen during the build and are the owner's to change.
+- DPU and GPU agents have prompts and skills but no domain tools (quantize, compile, benchmark) yet.
+- Sub-agent edits are not individually approved; the `ask_agent` call is approved once.
+- No general "run command" tool; a Python step is possible only as a workflow command step.
+- "Open in Trace" from a step on the Work screen is not built.
+- Later ideas the format leaves room for, not built: parallel candidates with a pick step, per-sub-agent models.
 
 ## How to run
 
@@ -144,11 +122,25 @@ npm test
 ```
 
 ```bash
+npm run web:build
+```
+
+```bash
+npm run app -- --folder <project folder>
+```
+
+```bash
 npm run agent -- --folder <project folder> --task "<what to do>"
 ```
 
 ```bash
-npm run agent -- --server office --folder <project folder> --task-file <task.md>
+npm run workflow -- --workflow workflows/retry-until-pass.json --folder <project folder> --task "<what to do>" --var design=rtl/top.v --var tb=tb/tb_top.v --no-pause
 ```
 
-Each run prints its steps and writes a trace under `runs/`.
+```bash
+bash scripts/eval_local.sh -n 3 -t 300
+```
+
+```bash
+bash scripts/h_task.sh /path/to/ai_demo easy office <model id> -n 3
+```
