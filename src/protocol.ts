@@ -51,6 +51,8 @@ function cleanBody(lines: string[], ended: boolean): string {
 		// A stray closing fence left over when @end was cut off.
 		out.pop();
 	}
+	// A --- left at the very end is the model repeating the separator, not file text.
+	while (out.length > 0 && out[out.length - 1]!.trim() === "---") out.pop();
 	return out.join("\n");
 }
 

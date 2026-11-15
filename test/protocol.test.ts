@@ -105,6 +105,11 @@ describe("parseReply", () => {
 		expect(r.call.body).toBe("module a;\nendmodule");
 	});
 
+	it("drops a separator line the model repeated at the end of the body", () => {
+		const r = callOf(parseReply("@tool write_file\npath: a.v\n---\nmodule a;\nendmodule\n---\n@end"));
+		expect(r.call.body).toBe("module a;\nendmodule");
+	});
+
 	it("ignores text after @end", () => {
 		const r = callOf(parseReply("@tool read_file\npath: a\n@end\nSome chatter\n@tool other\n@end"));
 		expect(r.call.name).toBe("read_file");

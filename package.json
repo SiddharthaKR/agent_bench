@@ -21,6 +21,7 @@
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "1.4.0",
 		"@earendil-works/pi-ai": "1.4.0",
+		"@modelcontextprotocol/sdk": "^1.32.2",
 		"typebox": "^1.0.0"
 	},
 	"devDependencies": {

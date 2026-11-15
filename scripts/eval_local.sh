@@ -39,6 +39,8 @@ for ((i=1; i<=runs; i++)); do
 		npx tsx src/cli.ts --task-file evals/gain/task.md "${args[@]}" >"$temp/agent.log" 2>&1
 	fi
 	agent_code=$?
+	# The check always uses the original testbench, whatever the run did to its copy.
+	mkdir -p "$temp/tb" && cp evals/gain/tb/tb_gain.v "$temp/tb/tb_gain.v"
 	# Resolve configured command arrays in Node so paths with spaces remain single arguments.
 	node --input-type=module - "$(native "$root")" "$(native "$temp")" >"$temp/check.log" 2>&1 <<'NODE'
 import fs from "node:fs";
@@ -61,12 +63,13 @@ for (const template of [commands.compile?.length ? commands.compile : ["iverilog
 NODE
 	check_code=$?
 	calls=$(grep -Ec '^[[:space:]]*[0-9]+\. [[:alnum:]_]+ ' "$temp/agent.log" || true)
+	# The verdict comes from the independent check alone, never from how the agent ended.
 	status=FAIL
-	if grep -q 'Ended: time' "$temp/agent.log"; then
-		status=TIME
-	elif [[ "$agent_code" == 0 && "$check_code" == 0 ]] && grep -q 'ALL TESTS PASSED' "$temp/check.log"; then
+	if [[ "$check_code" == 0 ]] && grep -q 'ALL TESTS PASSED' "$temp/check.log"; then
 		status=PASS
 		passed=$((passed + 1))
+	elif grep -q 'Ended: time' "$temp/agent.log"; then
+		status=TIME
 	fi
 	elapsed=$((SECONDS - start))
 	echo "run $i: $status, $calls tool calls, $elapsed s"
