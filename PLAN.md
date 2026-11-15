@@ -112,6 +112,21 @@ After the prompt fix (a given testbench is the judge), protected files and three
 
 **Overfitting caution.** These three tasks are the tuning set: skills and hints were adjusted by reading their failures, the fixed-point skill's worked module is close to the gain task, and samples are 3 or 4 runs. A held-out set of six other tasks (`pwm`, `seqdet`, `regbank`, `fifo`, `accum`, `uart_tx`) is only measured, never tuned against; the old harness's easy and medium tasks with the hidden judge are the second independent check.
 
+**Held-out set, commit 6eea7a1, `fpga-fast` workflow, two runs each (measured only, not tuned against):**
+
+| Task | Level | Passed | Seconds per run (average) |
+|---|---|---|---|
+| pwm | easy | 2 of 2 | 20 |
+| seqdet | easy | 2 of 2 | 127 |
+| accum | medium | 2 of 2 | 114 |
+| fifo | medium | 2 of 2 | 194 |
+| regbank | medium | 1 of 2 | 273 |
+| uart_tx | medium | 0 of 2 | 342 |
+
+Held-out total 9 of 12 (easy 4 of 4, medium 5 of 8), against 10 of 10 on the tuning set with the same commit family. So the gains carry over to other kinds of blocks, with a gap on medium tasks.
+
+**Old harness, easy task, hidden judge, commit 5c90232, single agent, 300 s: 0 of 4.** The task is bigger than the local ones (register bus, own testbench, report). One run had the data path right (16 of 16 cases) and failed 3 of 8 register read-back checks; the time went into rewriting a long testbench. Four general fixes and a design-then-testbench workflow followed (commit 8187fa5); rerun pending.
+
 What the traces of failed runs showed, and the fix for each (all 2026-11-15):
 - Retries never happened after a time-out. Fixed: time limit per agent step; a stopped step goes on to the checks.
 - Intermediate values registered, so the output was late. Fixed: latency rule, worked module in the fixed-point skill, "late output" hint.
