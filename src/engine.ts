@@ -121,11 +121,13 @@ export function createEngine(options: EngineOptions): Engine {
 			const workspace = await checkFolder(request.folder);
 			const workflow = await prepareWorkflowSkills(request.workflow, request.skills, agentDirOf);
 			return createWorkflowRun(randomUUID(), workflow, request.task, {
+				interactiveQuestions: true,
 				workspace,
 				exec,
 				// Each agent step is a fresh run: its own context, its own trace.
-				runAgent: async (step, task, signal, onLine) => {
+				runAgent: async (step, task, signal, onLine, onQuestion, questionBudget) => {
 					const result = await runAgent({
+						questionBudget,
 						agentDir: await agentDirOf(step.agent),
 						skills: step.skills,
 						workspace,
@@ -139,6 +141,7 @@ export function createEngine(options: EngineOptions): Engine {
 						exec,
 						fetchFn: options.fetchFn,
 						onStep: onLine,
+						onQuestion,
 						signal,
 					});
 					return { ok: result.reason === "done", text: result.finalText || result.error || `The agent ended with: ${result.reason}.`, limit: result.reason === "time" ? "time" : result.reason === "limit" ? "turns" : undefined };

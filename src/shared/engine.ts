@@ -25,6 +25,7 @@ export interface Session {
 	/** Accept or reject a proposed edit. */
 	resolve(proposalId: string, accept: boolean): void;
 	setAskFirst(askFirst: boolean): void;
+	answer?(questionId: string, text: string): boolean;
 }
 
 /** One run of a workflow. */
@@ -32,6 +33,7 @@ export interface WorkflowRun {
 	readonly id: string;
 	readonly events: readonly WorkflowEvent[];
 	readonly state: WorkflowRunState;
+	answer?(questionId: string, text: string): boolean;
 	subscribe(listener: (event: WorkflowEvent) => void): () => void;
 	/** Start from the first step. */
 	start(): void;

@@ -3,6 +3,8 @@
  * keeps its conversation between messages, every tool call becomes an event
  * the screen can show, and edits can wait for the user's yes or no.
  */
+import { createQuestionHandler } from "./tools/ask_user.ts";
+import { createDeadline } from "./deadline.ts";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
@@ -108,6 +110,7 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 		let guard = new LoopGuard({ maxCalls: agentFile.maxTurns ?? 40 });
 		let counter = 0;
 		let modelCalls = 0;
+		const totals = { questions: 0, unanswered: 0 };
 		let outputTokens = 0;
 		let saved = false;
 		let reminded = false;
@@ -144,9 +147,36 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 			trace.write({ type: "note", text });
 			note(text, "bad");
 		}
-		let deadline: number | undefined;
+		let deadline: ReturnType<typeof createDeadline> | undefined;
+		let pendingQuestion: { id: string; event: Extract<SessionEvent, { type: "question" }>; resolve: (text: string | undefined) => void } | undefined;
+		const questions = createQuestionHandler({
+			maxQuestions: agentFile.maxQuestions, trace,
+			onWait: (waiting) => waiting ? deadline?.pause() : deadline?.resume(),
+			onQuestion: (question) => new Promise((resolve) => {
+				const id = nextId("q");
+				const event: Extract<SessionEvent, { type: "question" }> = { type: "question", id, ...question, answer: null, pending: true };
+				pendingQuestion = { id, event, resolve };
+				emit({ type: "status", state: "waiting" });
+				if (pendingQuestion?.id === id) emit(event);
+			}),
+		});
+		ctx.onQuestion = async (question, signal) => {
+			try { return await questions.ask(question, signal); }
+			finally {
+				if (pendingQuestion) finishAnswer(pendingQuestion.id, undefined);
+				if (busy) emit({ type: "status", state: "working" });
+			}
+		};
+		function finishAnswer(id: string, text: string | undefined): boolean {
+			if (pendingQuestion?.id !== id) return false;
+			const pending = pendingQuestion;
+			pendingQuestion = undefined;
+			emit({ ...pending.event, answer: text ?? null, pending: false });
+			pending.resolve(text);
+			return true;
+		}
 		runSubagent = createSubagentRunner({ ...options, task: "", onStep: (line) => note(line) }, trace,
-			() => deadline === undefined ? undefined : Math.max(0, (deadline - Date.now()) / 1000));
+			() => deadline?.remaining());
 
 		const agent = new Agent({
 			initialState: {
@@ -280,20 +310,25 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 			busy = true;
 			saved = false;
 			reminded = false;
-			deadline = agentFile.maxSeconds === undefined ? undefined : Date.now() + agentFile.maxSeconds * 1000;
+			questions.reset();
 			guard = new LoopGuard({ maxCalls: agentFile.maxTurns ?? 40 });
 			emit({ type: "status", state: "working" });
-			const timer = agentFile.maxSeconds !== undefined ? setTimeout(() => {
+			deadline = createDeadline(agentFile.maxSeconds, () => {
 				for (const resolve of waiting.values()) resolve(false);
 				agent.abort();
 				note(`Ended: time (limit ${agentFile.maxSeconds} s)`);
-			}, agentFile.maxSeconds * 1000) : undefined;
+			});
+			deadline.resume();
 			try {
 				await agent.prompt(text);
 			} catch (error) {
 				note((error as Error).message, "bad");
 			} finally {
-				clearTimeout(timer);
+				deadline?.close();
+				trace.write({ type: "run_end", ...questions.counts() });
+				totals.questions += questions.counts().questions;
+				totals.unanswered += questions.counts().unanswered;
+				trace.updateSummary?.({ agent: agentFile.name, model: options.server.model, task: text, modelCalls, outputTokens, ...totals });
 			}
 			busy = false;
 			if (guard.blocked > 0 && guard.allowed >= (agentFile.maxTurns ?? 40)) note(`Stopped after ${guard.allowed} tool calls. Tell the agent how to continue.`, "bad");
@@ -315,12 +350,17 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 				const trimmed = text.trim();
 				if (!trimmed) return;
 				emit({ type: "user", id: nextId("u"), text: trimmed });
+				if (pendingQuestion) { finishAnswer(pendingQuestion.id, trimmed); return; }
 				// While the agent works, a message steers it: it is read after the current tool call.
 				if (busy) agent.steer({ role: "user", content: trimmed, timestamp: Date.now() });
 				else void run(trimmed);
 			},
+			answer(id: string, text: string) {
+				return !!text.trim() && finishAnswer(id, text.trim());
+			},
 			stop() {
 				if (!busy) return;
+				if (pendingQuestion) finishAnswer(pendingQuestion.id, undefined);
 				for (const resolve of [...waiting.values()]) resolve(false);
 				agent.abort();
 				note("Stopped by you.");

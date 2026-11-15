@@ -7,10 +7,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ServerConfig } from "./model.ts";
 import type { CommandConfig } from "./types.ts";
+import type { QualityCommands } from "./shared/api.ts";
 
 export interface Config {
 	servers: Record<string, ServerConfig>;
-	commands: CommandConfig;
+	commands: CommandConfig & QualityCommands;
 }
 
 export async function loadConfig(root: string): Promise<Config> {

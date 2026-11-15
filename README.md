@@ -38,3 +38,11 @@ Read [PLAN.md](PLAN.md) for the design and progress, [docs/server.md](docs/serve
 ## Scoring tasks
 
 The tuning set contains `gain`, `counter`, and `fir4`. The held-out set contains `pwm`, `seqdet`, `regbank`, `fifo`, `accum`, and `uart_tx`. Tune skills and hints only on the tuning set; the held-out set is only measured. Run either set with `bash scripts/eval_set.sh <tuning|heldout>`, followed by the usual `eval_local.sh` options.
+
+## External VerilogEval
+
+Run specification-to-RTL VerilogEval v2 with `bash scripts/verilog_eval.sh dev -n 2 -s local-fast -t 90`. The external benchmark must be cloned first. See [setup, split policy, judging and failure reports](evals-external/README.md). Tune only on dev; measure heldout without reading its failures to adjust skills.
+## RTL quality gate
+
+Run `npm run quality -- design.v` for a model-free RTL check. Findings include line numbers; notes do not fail the gate. The final line is `QUALITY PASS` or `QUALITY FAIL`, with exit code 1 for failures. Optional `commands.lint` (Verilator) and `commands.synth` (Yosys) arrays in config enable external checks when installed; the configured Icarus compiler also runs with `-Wall`. The tools line lists checks that ran. Eval runs record `quality` and `qualityFindings` separately from the functional verdict; `bash scripts/check_evals.sh` checks every reference.
+

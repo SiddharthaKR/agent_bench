@@ -341,3 +341,31 @@ describe("runAgent with a scripted model", () => {
 		expect(result.error).toContain("Could not reach the model server");
 	});
 });
+
+it("offers ask_user only to a listed top-level agent", async () => {
+	const { loadAgent } = await import("../src/agent.ts");
+	await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: ["ask_user"] }));
+	expect((await loadAgent(agentDir)).specs.map((s) => s.name)).toContain("ask_user");
+	expect((await loadAgent(agentDir, { depth: 1 })).specs.map((s) => s.name)).not.toContain("ask_user");
+	await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: [] }));
+	expect((await loadAgent(agentDir)).specs.map((s) => s.name)).not.toContain("ask_user");
+});
+it("excludes answering time and writes question counts and trace rows", async () => {
+	await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: ["ask_user"] }));
+	const model = fakeModel(["@tool ask_user\nassumption: One cycle.\n---\nLatency?\n@end", "Done."]);
+	const result = await runAgent({ agentDir, workspace, task: "Work", server: { baseUrl: "http://fake/v1", model: "fake" }, commands: { compile: [], simulate: [] }, runsDir, fetchFn: model.fetchFn, maxSeconds: 0.15,
+		onQuestion: async () => { await new Promise((resolve) => setTimeout(resolve, 200)); return "Two cycles."; } });
+	expect(result.reason).toBe("done");
+	expect(result).toMatchObject({ questions: 1, unanswered: 0 });
+	expect(model.requests[1]!.messages.at(-1)!.content).toContain("Answer: Two cycles.");
+	const { readTrace } = await import("../src/traces.ts");
+	expect((await readTrace(runsDir, path.basename(result.traceDir)))!.rows.some((row) => row.kind === "question")).toBe(true);
+});
+
+it("uses the unavailable result without a code API hook", async () => {
+	await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: ["ask_user"] }));
+	const model = fakeModel(["@tool ask_user\n---\nReset?\n@end", "Done."]);
+	const result = await run(model);
+	expect(model.requests[1]!.messages.at(-1)!.content).toContain("No one can answer now. Continue with your assumption and state it in your final summary.");
+	expect(JSON.parse(await readFile(path.join(result.traceDir, "summary.json"), "utf8"))).toMatchObject({ questions: 1, unanswered: 1 });
+});

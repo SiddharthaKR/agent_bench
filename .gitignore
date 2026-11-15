@@ -4,3 +4,4 @@ runs/
 *.log
 web/dist/
 config.local.json
+external/verilog-eval/

@@ -349,3 +349,15 @@ describe("local HTTP server", () => {
 		}
 	});
 });
+
+it.each(["session", "run"])("routes and validates %s answers", async (kind) => {
+	const target = kind === "session" ? fake.session : fake.run;
+	target.answer = vi.fn(() => true);
+	await json(kind === "session" ? "/api/sessions" : "/api/runs", "POST", kind === "session" ? sessionRequest : runRequest);
+	const url = kind === "session" ? "/api/sessions/session-1/answer" : "/api/runs/run-1/answer";
+	expect((await json(url, "POST", { questionId: "q1", text: "Use your assumption." })).status).toBe(200);
+	expect(target.answer).toHaveBeenCalledWith("q1", "Use your assumption.");
+	await expectError(await json(url, "POST", { questionId: "q1", text: " " }), 400);
+	target.answer = () => false;
+	await expectError(await json(url, "POST", { questionId: "q1", text: "Late" }), 409);
+});

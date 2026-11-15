@@ -1,5 +1,6 @@
 import type { ToolSpec } from "../types.ts";
 import { compile } from "./compile.ts";
+import { askUser } from "./ask_user.ts";
 import { readFile } from "./read_file.ts";
 import { replaceLines } from "./replace_lines.ts";
 import { runSim } from "./run_sim.ts";
@@ -8,7 +9,7 @@ import { writeFile } from "./write_file.ts";
 export { realExec } from "./exec.ts";
 export { resolveInWorkspace } from "./paths.ts";
 
-export const ALL_TOOLS: ToolSpec[] = [readFile, writeFile, replaceLines, compile, runSim];
+export const ALL_TOOLS: ToolSpec[] = [readFile, writeFile, replaceLines, compile, runSim, askUser];
 
 export function pickTools(names: string[]): ToolSpec[] {
 	return names.map((name) => {

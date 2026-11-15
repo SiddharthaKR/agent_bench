@@ -194,7 +194,7 @@ export function WorkScreen(props: ScreenProps) {
 			<section className="card work-conversation" aria-label="Conversation">
 				<div className="work-feed" ref={feed} onScroll={() => { const node = feed.current; if (node) pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 28; }}>
 					{!state.items.some((item) => item.type !== "proposal") && <p className="muted">Start a session. Type what you want this agent to do in the box below.</p>}
-					{state.items.map((item) => <Feed item={item} key={item.id} />)}
+					{state.items.map((item) => <Feed item={item} key={`${item.type}:${item.id}`} waiting={state.status === "waiting"} answer={async (id, text) => { if (session.current) await api.answerSession(session.current, id, text); }} />)}
 					{state.status === "working" && <div role="status">Agent is working…<div className="small muted work-live">{state.stream.split(/\r?\n/).slice(-3).join("\n")}</div></div>}
 				</div>
 				<div className="work-compose"><div className="work-quick">{["Fix the failing tests", "Run the simulation again"].map((text) => <button type="button" className="btn" key={text} disabled={sending} onClick={() => void send(text)}>{text}</button>)}</div>

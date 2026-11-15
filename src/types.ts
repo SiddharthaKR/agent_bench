@@ -49,11 +49,17 @@ export interface CommandConfig {
 }
 
 export interface ToolContext {
+	onQuestion?: (question: Question, signal?: AbortSignal) => Promise<string | undefined>;
 	/** Absolute path of the project folder. Tools must never touch files outside it. */
 	workspace: string;
 	exec: Exec;
 	commands: CommandConfig;
 	signal?: AbortSignal;
+}
+
+export interface Question {
+	question: string;
+	assumption?: string;
 }
 
 export interface ToolSpec {
@@ -113,4 +119,6 @@ export interface TraceWriter {
 	write(event: TraceEvent): void;
 	/** Writes summary.json and ends the trace. */
 	close(summary: Record<string, unknown>): void;
+	/** Refreshes a session summary while keeping its trace open. */
+	updateSummary?(summary: Record<string, unknown>): void;
 }

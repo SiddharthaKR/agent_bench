@@ -25,12 +25,13 @@ export type { TrimOptions } from "./context.ts";
 export { LoopGuard } from "./guard.ts";
 export type { GuardOptions } from "./guard.ts";
 export { realExec } from "./tools/index.ts";
-export type { Exec, ExecResult, CommandConfig } from "./types.ts";
+export type { Exec, ExecResult, CommandConfig, Question } from "./types.ts";
 export type { ServerConfig } from "./model.ts";
 export type * from "./shared/api.ts";
 export type * from "./shared/engine.ts";
 
 export interface RunWorkflowOptions {
+	onQuestion?: import("./types.ts").ToolContext["onQuestion"];
 	protect?: string[];
 	skills?: string[];
 	root: string;
@@ -66,15 +67,17 @@ export async function prepareWorkflowRun(options: RunWorkflowOptions) {
 	const workspace = path.resolve(options.folder);
 	const exec = options.exec ?? realExec;
 	const run = createWorkflowRun(randomUUID(), workflow, options.task, {
+		onQuestion: options.onQuestion,
 		workspace,
 		exec,
-		runAgent: async (step, task, signal, onLine) => {
+		runAgent: async (step, task, signal, onLine, onQuestion, questionBudget) => {
 			if (!/^[A-Za-z0-9_-]+$/.test(step.agent)) throw new Error("Invalid agent name.");
 			const result = await runAgent({
+				questionBudget,
 				agentDir: path.join(root, "agents", step.agent), workspace, task,
 				server: { ...server, model: step.model ?? options.model ?? server.model, temperature: step.temperature ?? server.temperature, extra: { ...server.extra, ...step.extra } },
 				commands: config.commands, runsDir: path.join(root, "runs"), exec,
-				skills: step.skills, signal, onStep: onLine, maxSeconds: step.maxSeconds ?? options.maxSeconds, fetchFn: options.fetchFn,
+				onQuestion, skills: step.skills, signal, onStep: onLine, maxSeconds: step.maxSeconds ?? options.maxSeconds, fetchFn: options.fetchFn,
 				protect: workflow.protect?.map((entry) => fillPlaceholders(entry, { ...workflow.vars, task: options.task })),
 				overrides: { maxTurns: step.maxTurns, tools: step.tools },
 			});

@@ -22,6 +22,11 @@ export interface DiffLine {
 
 // ---------- App configuration ----------
 
+export interface QualityCommands {
+	lint?: string[];
+	synth?: string[];
+}
+
 export interface AgentInfo {
 	/** Folder name under agents/. */
 	id: string;
@@ -53,7 +58,16 @@ export type StepStatus = "running" | "ok" | "error" | "waiting" | "rejected" | "
  * as "running" and is sent again when it ends). A proposal has the same id as
  * the step it belongs to.
  */
+export interface UserQuestion {
+	pending?: boolean;
+	id: string;
+	question: string;
+	assumption?: string;
+	answer: string | null;
+}
+
 export type SessionEvent =
+	| ({ type: "question" } & UserQuestion)
 	/** The agent started or stopped working, or waits for the user to accept a change. */
 	| { type: "status"; state: "idle" | "working" | "waiting" }
 	| { type: "user"; id: string; text: string }
@@ -162,7 +176,7 @@ export interface Workflow {
 	steps: WorkflowStep[];
 }
 
-export type RunStatus = "idle" | "running" | "paused" | "done" | "failed" | "stopped";
+export type RunStatus = "idle" | "running" | "waiting" | "paused" | "done" | "failed" | "stopped";
 export type StepRunStatus = "waiting" | "running" | "passed" | "failed" | "kept";
 
 export interface StepRun {
@@ -186,6 +200,7 @@ export interface WorkflowRunState {
 }
 
 export type WorkflowEvent =
+	| ({ type: "question"; stepId: string } & UserQuestion)
 	/** The whole state, sent after every change. Simple and always consistent. */
 	| { type: "state"; state: WorkflowRunState }
 	/** A progress line from the step that is running (a tool call of an agent step). */

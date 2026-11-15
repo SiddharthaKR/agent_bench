@@ -5,6 +5,7 @@
  *
  * Options: --agent fpga | --server local | --model <id> | --task-file <path> | --runs <dir>
  */
+import { questionReader } from "./cli-question.ts";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,7 @@ export function parseArgs(argv: string[]): Record<string, string> {
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i] ?? "";
 		if (!arg.startsWith("--")) throw new Error(`Unexpected argument "${arg}".`);
+		if (arg === "--ask") { out.ask = "true"; continue; }
 		const value = argv[i + 1];
 		if (value === undefined || value.startsWith("--")) throw new Error(`Option ${arg} needs a value.`);
 		out[arg.slice(2)] = value;
@@ -50,6 +52,7 @@ async function main(): Promise<number> {
 	process.once("SIGINT", () => controller.abort());
 
 	const result = await runAgent({
+		onQuestion: questionReader(args.ask === "true", undefined, controller.signal, () => controller.abort()),
 		agentDir: path.join(ROOT, "agents", agentName),
 		workspace: args.folder,
 		task,

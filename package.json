@@ -12,6 +12,7 @@
 		"workflow": "tsx src/cli-workflow.ts",
 		"app": "tsx src/server/main.ts",
 		"result": "tsx src/cli-result.ts",
+		"quality": "tsx src/cli-quality.ts",
 		"web:install": "npm --prefix web install",
 		"web:build": "npm --prefix web run build",
 		"web:dev": "npm --prefix web run dev",

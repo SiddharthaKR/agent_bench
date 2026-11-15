@@ -391,3 +391,39 @@ describe("lineDiff", () => {
 		expect(lineDiff("a\nc\n", "a\nb\nc\n", 0)).toEqual([{ kind: "add", text: "b", line: 2 }]);
 	});
 });
+
+it.each(["message", "answer", "assumption", "stop"])("handles a pending question through %s", async (action) => {
+	await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Test", tools: ["ask_user"] }));
+	const model = fakeModel(["@tool ask_user\nassumption: One cycle.\n---\nLatency?\n@end", "Done."]);
+	const session = await open(model, false);
+	const done = idleAfterWork(session);
+	session.send("Work");
+	const question = await until(session, (event) => event.type === "question") as Extract<SessionEvent, { type: "question" }>;
+	expect(session.events).toContainEqual({ type: "status", state: "waiting" });
+	if (action === "stop") session.stop();
+	else if (action === "message") session.send("Two cycles.");
+	else session.answer!(question.id, action === "assumption" ? "Use your assumption." : "Two cycles.");
+	await done;
+	if (action !== "stop") expect(model.requests[1]!.messages.at(-1)!.content).toContain(action === "assumption" ? "Answer: Use your assumption." : "Answer: Two cycles.");
+});
+
+it("records an immediate answer supplied by a waiting-status listener", async () => {
+	await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Test", tools: ["ask_user"] }));
+	const session = await open(fakeModel(["@tool ask_user\n---\nLatency?\n@end", "Done."]), false);
+	session.subscribe((event) => { if (event.type === "status" && event.state === "waiting") session.send("Two cycles."); });
+	const done = idleAfterWork(session);
+	session.send("Work");
+	await done;
+	expect(session.events.find((event) => event.type === "question")).toMatchObject({ answer: "Two cycles." });
+});
+
+it("leaves a stopped question closed when the session works again", async () => {
+	await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Test", tools: ["ask_user"] }));
+	const session = await open(fakeModel(["@tool ask_user\n---\nLatency?\n@end", "Done."]), false);
+	const done = idleAfterWork(session);
+	session.send("Work");
+	await until(session, (event) => event.type === "question");
+	session.stop();
+	await done;
+	expect(session.events.find((event) => event.type === "question")).toMatchObject({ pending: false, answer: null });
+});

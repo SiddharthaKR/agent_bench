@@ -91,12 +91,35 @@ NODE
 	elif grep -q 'Ended: time' "$temp/agent.log"; then
 		status=TIME
 	fi
+	quality=skipped
+	quality_findings=0
+	if [[ -f "$temp/$design" ]]; then
+		node --input-type=module - "$(native "$temp/$design")" >"$temp/quality.log" 2>&1 <<'NODE'
+import { loadConfig } from "./src/config.ts";
+import { qualityReport } from "./src/tools/quality.ts";
+const config = await loadConfig(process.cwd());
+const report = await qualityReport([process.argv[2]], { commands: config.commands });
+console.log(`RESULT ${report.pass ? "pass" : "fail"} ${report.findings.length}`);
+NODE
+		if [[ "$?" == 0 ]]; then
+			read -r _ quality quality_findings <<< "$(grep '^RESULT ' "$temp/quality.log" | tail -1)"
+		else
+			cat "$temp/quality.log" >&2
+		fi
+	fi
 	elapsed=$((SECONDS - start))
-	echo "run $i: $status, $calls tool calls, $elapsed s"
+	echo "run $i: $status, quality $quality, $calls tool calls, $elapsed s"
 	trace="$(sed -n 's/^Trace //p' "$temp/agent.log" | tail -1 | tr -d '\r')"
 	metrics=()
 	[[ -z "$trace" ]] || metrics+=(--trace "$trace")
-	record_result --suite "$suite" --level "$level" --server "$server" --model "$record_model" --setup "$setup" --verdict "$status" --tool-calls "$calls" --seconds "$elapsed" "${metrics[@]}"
+	node --input-type=module - "$quality" "$quality_findings" --suite "$suite" --level "$level" --server "$server" --model "$record_model" --setup "$setup" --verdict "$status" --tool-calls "$calls" --seconds "$elapsed" "${metrics[@]}" <<'NODE'
+import path from "node:path";
+import { parseResultArgs } from "./src/cli-result.ts";
+import { appendResult } from "./src/results.ts";
+const [quality, count, ...args] = process.argv.slice(2);
+await appendResult(path.join(process.cwd(), "runs"), { ...parseResultArgs(args), quality, qualityFindings: Number(count) });
+NODE
+	[[ "$?" == 0 ]] || echo 'Could not record the result.' >&2
 	rm -rf -- "$temp"
 	temp=""
 done

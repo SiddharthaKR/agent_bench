@@ -1,6 +1,7 @@
 import type { AgentStep, StepRun, StepRunStatus, Workflow, WorkflowEvent, WorkflowRunState, WorkflowStep } from "../../../src/shared/api.ts";
 
 export interface RunView {
+	question?: Extract<WorkflowEvent, { type: "question" }>;
 	id: string;
 	workflow: Workflow;
 	folder: string;
@@ -10,6 +11,7 @@ export interface RunView {
 }
 
 export function applyRunEvent(prior: RunView, event: WorkflowEvent): RunView {
+	if (event.type === "question") return { ...prior, question: event.answer === null && event.pending !== false ? event : undefined };
 	if (event.type === "line") return { ...prior, lines: { ...prior.lines, [event.stepId]: event.text } };
 	let lastCommand = prior.lastCommand;
 	const lines = { ...prior.lines };
@@ -20,7 +22,7 @@ export function applyRunEvent(prior: RunView, event: WorkflowEvent): RunView {
 		const step = prior.workflow.steps.find((item) => item.id === result.stepId);
 		if (step?.type === "command" && (!before || before.status !== result.status || before.round !== result.round || before.text !== result.text || before.ms !== result.ms)) lastCommand = { name: step.name, result };
 	}
-	return { ...prior, state: event.state, lines, lastCommand };
+	return { ...prior, state: event.state, lines, lastCommand, question: event.state.status === "waiting" ? prior.question : undefined };
 }
 
 export function parseCommand(text: string): string[] {
@@ -88,6 +90,7 @@ export function stepStatus(status: StepRunStatus = "waiting"): { text: string; t
 export function runStatus(state: WorkflowRunState | undefined, steps: readonly { id: string }[]): { text: string; tone: string } {
 	const n = Math.max(1, steps.findIndex((step) => step.id === state?.current) + 1);
 	switch (state?.status) {
+		case "waiting": return { text: "Waiting for you", tone: "tint" };
 		case "running": return { text: `Running step ${n} of ${steps.length}, round ${state.round}`, tone: "warn" };
 		case "paused": return { text: `Paused before step ${n}`, tone: "tint" };
 		case "done": return { text: `Finished in ${state.round} round(s)`, tone: "ok" };

@@ -133,7 +133,7 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 			sessions.set(session.id, session);
 			return sendJson(response, { id: session.id });
 		}
-		const sessionRoute = /^\/api\/sessions\/([^/]+)\/(events|message|stop|resolve|ask-first)$/.exec(pathname);
+		const sessionRoute = /^\/api\/sessions\/([^/]+)\/(events|message|stop|resolve|ask-first|answer)$/.exec(pathname);
 		if (sessionRoute) {
 			const [, id, action] = sessionRoute;
 			method(request, action === "events" ? "GET" : "POST");
@@ -146,6 +146,7 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 			}
 			else {
 				const body = record(await readJson(request));
+				if (action === "answer" && !session.answer?.(stringField(body.questionId, "Question id"), stringField(body.text, "Text"))) throw new HttpError(409, "This question is no longer waiting for an answer.");
 				if (action === "message") session.send(stringField(body.text, "Text"));
 				if (action === "resolve") session.resolve(stringField(body.proposalId, "Proposal id"), booleanField(body.accept, "Accept"));
 				if (action === "ask-first") session.setAskFirst(booleanField(body.askFirst, "Ask first"));
@@ -183,7 +184,7 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 			run.start();
 			return sendJson(response, { id: run.id });
 		}
-		const runRoute = /^\/api\/runs\/([^/]+)\/(events|resume|stop)$/.exec(pathname);
+		const runRoute = /^\/api\/runs\/([^/]+)\/(events|resume|stop|answer)$/.exec(pathname);
 		if (runRoute) {
 			const [, id, action] = runRoute;
 			method(request, action === "events" ? "GET" : "POST");
@@ -196,8 +197,12 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 			}
 			else {
 				const body = record(await readJson(request));
-				if (body.fromStepId !== undefined) stringField(body.fromStepId, "From step id");
-				run.resume(body.fromStepId as string | undefined);
+				if (action === "answer") {
+					if (!run.answer?.(stringField(body.questionId, "Question id"), stringField(body.text, "Text"))) throw new HttpError(409, "This question is no longer waiting for an answer.");
+				} else {
+					if (body.fromStepId !== undefined) stringField(body.fromStepId, "From step id");
+					run.resume(body.fromStepId as string | undefined);
+				}
 			}
 			return sendJson(response, { ok: true });
 		}

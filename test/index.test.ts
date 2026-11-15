@@ -103,3 +103,37 @@ it("rejects invalid per-step settings and accepts their boundaries", () => {
 	expect(validateWorkflow({ ...workflow, steps: [{ ...step, tools: [] }] }).join(" ")).toContain("at least one tool");
 	for (const temperature of [0, 2]) expect(validateWorkflow({ ...workflow, steps: [{ ...step, temperature, maxTurns: 1 }] })).toEqual([]);
 });
+
+it.each([false, true])("resumes a real workflow agent in the same turn with no time charge (app: %s)", async (app) => {
+	await writeFile(path.join(root, "agents", "writer", "agent.json"), JSON.stringify({ name: "Writer", tools: ["ask_user"], maxSeconds: 0.2, maxQuestions: 3 }));
+	const asking: Workflow = { ...workflow, steps: [1, 2, 3, 4].map((n) => ({ id: `ask${n}`, name: `Ask ${n}`, type: "agent" as const, agent: "writer", task: "Work" })) };
+	const bodies: { messages: { content: string }[] }[] = [];
+	const fetchQuestions: typeof fetch = async (_url, init) => {
+		const body = JSON.parse(String(init?.body));
+		bodies.push(body);
+		const content = bodies.length % 2 ? `@tool ask_user\nassumption: One cycle.\n---\nLatency ${bodies.length}?\n@end` : "Done.";
+		return new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } });
+	};
+	let answers = 0;
+	if (app) {
+		const engine = createEngine({ root, defaultFolder: root, fetchFn: fetchQuestions });
+		const run = await engine.createWorkflowRun({ workflow: asking, folder: root, server: "local", task: "Work" });
+		const done = new Promise<void>((resolve) => run.subscribe((event) => {
+			if (event.type === "question" && event.answer === null) {
+				answers++;
+				expect(run.state.status).toBe("waiting");
+				setTimeout(() => run.answer!(event.id, "Two cycles."), 250);
+			}
+			if (event.type === "state" && ["done", "failed"].includes(event.state.status)) resolve();
+		}));
+		run.start();
+		await done;
+		expect(run.state.status).toBe("done");
+	} else {
+		const state = await runWorkflow({ root, folder: root, workflow: asking, task: "Work", fetchFn: fetchQuestions, onQuestion: async () => { answers++; await new Promise((resolve) => setTimeout(resolve, 250)); return "Two cycles."; } });
+		expect(state.status).toBe("done");
+	}
+	expect(answers).toBe(3);
+	expect(bodies).toHaveLength(8);
+	expect(bodies[7]!.messages.at(-1)!.content).toContain("No one can answer now.");
+});

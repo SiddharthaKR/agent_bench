@@ -493,6 +493,7 @@ describe("pickTools", () => {
 			"replace_lines",
 			"compile",
 			"run_sim",
+			"ask_user",
 		]);
 	});
 	it("throws on an unknown name", () => {

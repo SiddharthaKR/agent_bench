@@ -291,3 +291,58 @@ describe("workflow", () => {
 		expect(validateWorkflow(shipped)).toEqual([]);
 	});
 });
+
+it.each(["answer", "stop"])("handles workflow questions and excludes waiting time: %s", async (action) => {
+	const run = createWorkflowRun("r", workflow([agent]), "Work", deps({
+		interactiveQuestions: true,
+		runAgent: async (_step, _task, _signal, _line, ask) => {
+			const answer = await ask!({ question: "Latency?", assumption: "One cycle." });
+			return { ok: true, text: answer ?? "Stopped" };
+		},
+	}));
+	const done = new Promise<void>((resolve) => run.subscribe((event) => {
+		if (event.type === "state" && ["done", "stopped"].includes(event.state.status)) resolve();
+	}));
+	run.start();
+	expect(run.state.status).toBe("waiting");
+	const question = run.events.find((event) => event.type === "question");
+	if (question?.type !== "question") throw new Error("Missing question");
+	const started = Date.now();
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	if (action === "stop") run.stop();
+	else {
+		expect(run.answer!("stale", "No")).toBe(false);
+		expect(run.answer!(question.id, "Use your assumption.")).toBe(true);
+		expect(run.answer!(question.id, "Duplicate")).toBe(false);
+	}
+	await done;
+	if (action === "answer") {
+		expect(run.state.steps[0]!.text).toBe("Use your assumption.");
+		expect(run.state.steps[0]!.ms).toBeLessThan(Date.now() - started - 20);
+	} else expect(run.state.status).toBe("stopped");
+});
+
+it("preserves the new question when a waiting workflow is stopped and resumed immediately", async () => {
+	let restarted = false;
+	let count = 0;
+	const run = createWorkflowRun("r", workflow([agent]), "Work", deps({ interactiveQuestions: true,
+		runAgent: async (_step, _task, _signal, _line, ask) => ({ ok: true, text: await ask!({ question: `Question ${++count}?` }) ?? "Stopped" }),
+	}));
+	run.subscribe((event) => {
+		if (event.type === "state" && event.state.status === "waiting" && !restarted) {
+			restarted = true;
+			run.stop();
+			run.resume();
+		}
+	});
+	run.start();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	const question = run.events.find((event) => event.type === "question" && event.question === "Question 2?");
+	if (question?.type !== "question") throw new Error("Missing resumed question");
+	expect(run.state.status).toBe("waiting");
+	const accepted = run.answer!(question.id, "Answer two.");
+	if (!accepted) run.stop();
+	expect(accepted).toBe(true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(run.state.status).toBe("done");
+});

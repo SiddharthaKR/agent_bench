@@ -25,6 +25,8 @@
 		}
 	},
 	"commands": {
+		"lint": ["verilator", "--lint-only", "-Wall", "{files}"],
+		"synth": ["yosys", "-q", "-p", "read_verilog -sv {files}; synth; check -assert"],
 		"compile": [
 			"iverilog",
 			"-g2012",

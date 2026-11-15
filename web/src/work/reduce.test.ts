@@ -47,3 +47,13 @@ describe("work events", () => {
 		expect(reduce(state, { type: "reset" })).toEqual(initialState());
 	});
 });
+
+it("keeps a question and its answer in the work feed", () => {
+	const question = { type: "question" as const, id: "q", question: "Latency?", assumption: "One cycle.", answer: null };
+	const waiting = reduce(reduce(initialState(), { type: "status", state: "waiting" }), question);
+	expect(waiting.items).toEqual([question]);
+	expect(waiting.status).toBe("waiting");
+	const answered = reduce(waiting, { ...question, answer: "Two cycles." });
+	expect(answered.items).toEqual([{ ...question, answer: "Two cycles." }]);
+	expect(waiting.items).toEqual([question]);
+});

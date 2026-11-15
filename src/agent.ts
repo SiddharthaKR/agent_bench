@@ -2,6 +2,9 @@
  * Runs one agent on one task: loads the agent folder, builds the prompt,
  * wires tools, loop guard and trace into pi-agent-core, and reports how it ended.
  */
+import { createQuestionHandler } from "./tools/ask_user.ts";
+import { createDeadline } from "./deadline.ts";
+import type { Question } from "./types.ts";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -25,6 +28,7 @@ import type { McpServer } from "./mcp.ts";
 import type { CommandConfig, Exec, ToolContext, ToolSpec } from "./types.ts";
 
 export interface AgentFile {
+	maxQuestions?: number;
 	name: string;
 	tools: string[];
 	maxTurns?: number;
@@ -37,6 +41,9 @@ export interface AgentFile {
 }
 
 export interface RunOptions {
+	/** Shared across the fresh agent contexts in a workflow run. */
+	questionBudget?: { used: number };
+	onQuestion?: (question: Question) => Promise<string | undefined>;
 	protect?: string[];
 	/** Names of this agent's skills to include in the system prompt. */
 	skills?: string[];
@@ -69,6 +76,8 @@ export interface LoadAgentOptions {
 export type EndReason = "done" | "loop" | "limit" | "error" | "aborted" | "time";
 
 export interface RunResult {
+	questions?: number;
+	unanswered?: number;
 	reason: EndReason;
 	/** Last thing the model said. */
 	finalText: string;
@@ -151,7 +160,7 @@ export async function loadAgent(agentDir: string, options: LoadAgentOptions = {}
 	// A step's tool list may name use_skill and ask_agent to keep them; without a list both are on.
 	const keepSkills = selected === undefined || selected.includes("use_skill");
 	const keepAgents = selected === undefined || selected.includes("ask_agent");
-	const specs = pickTools((selected ?? agentFile.tools).filter((name) => name !== "use_skill" && name !== "ask_agent"));
+	const specs = pickTools((selected ?? agentFile.tools).filter((name) => name !== "use_skill" && name !== "ask_agent" && !(name === "ask_user" && (options.depth ?? 0) > 0)));
 	// The agent's skills list decides what is always on or offered; a run may preload any skill in the folder.
 	const allSkills = await loadSkills(agentDir);
 	validateSkillNames(allSkills, options.skills ?? [], agentFile.name);
@@ -189,7 +198,11 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		const ctx: ProtectedContext & { smallFileLines?: number } = { smallFileLines: agentFile.smallFileLines, protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
 		const guard = new LoopGuard({ maxCalls: options.overrides?.maxTurns ?? agentFile.maxTurns ?? 40 });
 		const seconds = options.maxSeconds ?? agentFile.maxSeconds;
-		const remainingSeconds = () => seconds === undefined ? undefined : Math.max(0, seconds - (Date.now() - started) / 1000);
+		let timedOut = false;
+		const deadline = createDeadline(seconds, () => { timedOut = true; agent.abort(); }, started);
+		const remainingSeconds = deadline.remaining;
+		const questions = createQuestionHandler({ onQuestion: options.onQuestion, maxQuestions: agentFile.maxQuestions, budget: options.questionBudget, trace, onWait: (waiting) => waiting ? deadline.pause() : deadline.resume() });
+		ctx.onQuestion = questions.ask;
 		runSubagent = createSubagentRunner({ ...options, skills: undefined }, trace, remainingSeconds);
 
 		let stoppedBy: EndReason | undefined;
@@ -278,8 +291,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
 		const abort = () => agent.abort();
 		options.signal?.addEventListener("abort", abort, { once: true });
-		let timedOut = false;
-		const timer = seconds !== undefined ? setTimeout(() => { timedOut = true; agent.abort(); }, remainingSeconds()! * 1000) : undefined;
+		deadline.resume();
 
 		let error: string | undefined;
 		try {
@@ -287,7 +299,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		} catch (thrown) {
 			error = (thrown as Error).message;
 		} finally {
-			clearTimeout(timer);
+			deadline.close();
 			options.signal?.removeEventListener("abort", abort);
 		}
 
@@ -303,6 +315,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		else if (stoppedBy) reason = stoppedBy;
 
 		const result: RunResult = {
+			...questions.counts(),
 			reason,
 			finalText,
 			...(error ? { error } : {}),

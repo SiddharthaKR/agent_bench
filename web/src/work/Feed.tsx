@@ -1,8 +1,10 @@
+import { QuestionCard } from "../QuestionCard.tsx";
 import { useState } from "react";
 import type { FeedItem } from "./reduce.ts";
 
-export function Feed({ item }: { item: FeedItem }) {
+export function Feed({ item, answer, waiting }: { item: FeedItem; answer: (id: string, text: string) => Promise<unknown>; waiting: boolean }) {
 	const [expanded, setExpanded] = useState(false);
+	if (item.type === "question") return <QuestionCard question={item} disabled={!waiting} answer={(text) => answer(item.id, text)} />;
 	if (item.type === "proposal") return null;
 	if (item.type === "user") return <div className="work-user">{item.text}</div>;
 	if (item.type === "agent") return <div className="work-agent">{item.text}</div>;

@@ -1,4 +1,6 @@
 export interface TraceInfo {
+	questions?: number;
+	unanswered?: number;
 	id: string;
 	agent: string;
 	model: string;
@@ -14,7 +16,7 @@ export interface TraceRow {
 	id: string;
 	call: number;
 	direction: "sent" | "received";
-	kind: "system" | "user" | "thinking" | "tool call" | "tool result" | "tool error" | "bad tool call" | "reply" | "guard" | "error";
+	kind: "question" | "system" | "user" | "thinking" | "tool call" | "tool result" | "tool error" | "bad tool call" | "reply" | "guard" | "error";
 	title: string;
 	text: string;
 	meta: string;

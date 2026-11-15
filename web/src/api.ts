@@ -41,6 +41,7 @@ export const api = {
 
 	createSession: (request: CreateSessionRequest) => call<CreateSessionResponse>("POST", "/api/sessions", request),
 	sendMessage: (id: string, text: string) => call<{ ok: true }>("POST", `/api/sessions/${id}/message`, { text }),
+	answerSession: (id: string, questionId: string, text: string) => call<{ ok: true }>("POST", `/api/sessions/${id}/answer`, { questionId, text }),
 	stopSession: (id: string) => call<{ ok: true }>("POST", `/api/sessions/${id}/stop`),
 	resolveProposal: (id: string, proposalId: string, accept: boolean) =>
 		call<{ ok: true }>("POST", `/api/sessions/${id}/resolve`, { proposalId, accept }),
@@ -51,6 +52,7 @@ export const api = {
 	deleteWorkflow: (id: string) => call<{ ok: true }>("DELETE", `/api/workflows/${id}`),
 	startRun: (request: RunWorkflowRequest) => call<RunWorkflowResponse>("POST", "/api/runs", request),
 	resumeRun: (id: string, fromStepId?: string) => call<{ ok: true }>("POST", `/api/runs/${id}/resume`, { fromStepId }),
+	answerRun: (id: string, questionId: string, text: string) => call<{ ok: true }>("POST", `/api/runs/${id}/answer`, { questionId, text }),
 	stopRun: (id: string) => call<{ ok: true }>("POST", `/api/runs/${id}/stop`),
 };
 

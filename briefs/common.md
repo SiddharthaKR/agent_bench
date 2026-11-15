@@ -22,6 +22,7 @@ PUT    /api/file            { folder, path, text }        -> { ok: true }
 POST   /api/sessions        CreateSessionRequest          -> CreateSessionResponse
 GET    /api/sessions/:id/events                 -> server-sent events, one SessionEvent per message
 POST   /api/sessions/:id/message   { text }               -> { ok: true }
+POST   /api/sessions/:id/answer { questionId, text }       -> { ok: true }
 POST   /api/sessions/:id/stop                             -> { ok: true }
 POST   /api/sessions/:id/resolve   { proposalId, accept } -> { ok: true }
 POST   /api/sessions/:id/ask-first { askFirst }           -> { ok: true }
@@ -31,6 +32,7 @@ DELETE /api/workflows/:id                                 -> { ok: true }
 POST   /api/runs            RunWorkflowRequest            -> RunWorkflowResponse   (creates and starts the run)
 GET    /api/runs/:id/events                     -> server-sent events, one WorkflowEvent per message
 POST   /api/runs/:id/resume { fromStepId? }               -> { ok: true }
+POST   /api/runs/:id/answer { questionId, text }           -> { ok: true }
 POST   /api/runs/:id/stop                                 -> { ok: true }
 ```
 

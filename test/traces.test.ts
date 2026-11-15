@@ -129,3 +129,12 @@ it("serves both trace routes, searches directories in order, and returns JSON er
 	}
 	for (const route of ["/api/traces", "/api/traces/same"]) expect((await fetch(base + route, { method: "POST" })).status).toBe(405);
 });
+
+it("shows question rows and summary counts", async () => {
+	const dir = await trace("questions", [{ type: "question", question: "Reset?", assumption: "Synchronous.", answer: null, seconds: 1.5 }]);
+	await writeFile(path.join(dir, "summary.json"), JSON.stringify({ questions: 1, unanswered: 1 }));
+	const detail = await readTrace(root, "questions");
+	expect(detail!.info).toMatchObject({ questions: 1, unanswered: 1 });
+	expect(detail!.rows).toHaveLength(1);
+	expect(detail!.rows[0]).toMatchObject({ kind: "question", text: "Reset?\nAssumption: Synchronous.\nUnanswered\nWaited 1.5 s" });
+});

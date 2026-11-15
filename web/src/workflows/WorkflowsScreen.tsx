@@ -1,3 +1,4 @@
+import { QuestionCard } from "../QuestionCard.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { ScreenProps } from "../App.tsx";
 import type { Workflow, WorkflowEvent } from "../../../src/shared/api.ts";
@@ -151,7 +152,7 @@ export function WorkflowsScreen(props: ScreenProps) {
 		const old = active.current;
 		if (!old || old.id === exceptId) return;
 		const oldRun = runs[old.workflowId];
-		if (!oldRun?.state || oldRun.state.status === "running" || oldRun.state.status === "paused") {
+		if (!oldRun?.state || oldRun.state.status === "running" || oldRun.state.status === "waiting" || oldRun.state.status === "paused") {
 			await api.stopRun(old.id);
 			if (!mounted.current) return;
 			setRuns((previous) => {
@@ -197,7 +198,7 @@ export function WorkflowsScreen(props: ScreenProps) {
 
 	const counts = countRuns(run?.workflow.steps ?? [], state?.steps ?? []);
 	const canResume = state && ["failed", "stopped", "paused"].includes(state.status);
-	const running = !!run && (!state || state.status === "running");
+	const running = !!run && (!state || state.status === "running" || state.status === "waiting");
 	const paused = state?.status === "paused";
 	const mainText = running ? "Stop" : paused ? "Continue" : state && state.status !== "idle" ? "Run again" : "Run workflow";
 	const rows = variableRows[selected] ?? [];
@@ -239,6 +240,7 @@ export function WorkflowsScreen(props: ScreenProps) {
 					}}>Add step</button>
 				</div>
 				<aside className="wf-panel">
+					{run?.question && state?.status === "waiting" && <QuestionCard key={run.question.id} question={run.question} answer={(text) => api.answerRun(run.id, run.question!.id, text)} />}
 					<div className="wf-counts">{[["Round", state?.round ?? "—"], ["Agent steps run", counts.agent], ["Command steps run", counts.command]].map(([label, value]) => <div className="card wf-stat" key={label}><span className="small muted">{label}</span><strong>{value}</strong></div>)}</div>
 					<section className="card wf-panel-card"><span className="label">Result</span>{run?.lastCommand ? <><div>{run.lastCommand.name}</div><pre className="mono wf-output">{run.lastCommand.result.text.split("\n").map((line, index) => <span key={index} className={/FAIL|error/i.test(line) ? "tone-bad" : /PASS/.test(line) ? "tone-ok" : ""}>{line}{"\n"}</span>)}</pre></> : <p className="muted">Nothing yet. The output of the last command step shows up here.</p>}</section>
 					<section className="card wf-panel-card"><span className="label">Rounds</span>{state?.log.length ? <div className="wf-log">{state.log.map((line, index) => <div key={index}>{line}</div>)}</div> : <p className="muted">Nothing yet. Each loop back and each finished round is listed here.</p>}</section>

@@ -36,6 +36,8 @@ export async function readTrace(runsDir: string, id: string): Promise<TraceDetai
 		}
 	} catch { /* A running trace has no summary. */ }
 	const info: TraceInfo = { id, agent: string(summary.agent), model: string(summary.model), task: string(summary.task), startedAt, ended: hasSummary, modelCalls: 0, toolErrors: 0 };
+	if (typeof summary.questions === "number") info.questions = number(summary.questions);
+	if (typeof summary.unanswered === "number") info.unanswered = number(summary.unanswered);
 	if (typeof summary.reason === "string") info.reason = summary.reason;
 	const detail: TraceDetail = { info, contextTokens: 0, outputTokens: 0, elapsedMs: 0, rows: [] };
 	let firstTime: number | undefined;
@@ -89,6 +91,7 @@ export async function readTrace(runsDir: string, id: string): Promise<TraceDetai
 					if (string(event.reasoning).trim()) add("thinking", "received", string(event.reasoning));
 					add(event.kind === "call" ? "tool call" : ["malformed", "invalid", "empty"].includes(string(event.kind)) ? "bad tool call" : "reply", "received", string(event.text));
 					break;
+				case "question": add("question", "received", [string(event.question), event.assumption ? `Assumption: ${string(event.assumption)}` : "", event.answer === null ? "Unanswered" : `Answer: ${string(event.answer)}`, `Waited ${number(event.seconds)} s`].filter(Boolean).join("\n")); break;
 				case "guard": add("guard", "sent", string(event.reason)); break;
 				case "model_error":
 					call = number(event.request) || call;

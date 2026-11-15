@@ -1,3 +1,4 @@
+import { questionReader } from "./cli-question.ts";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,6 +6,7 @@ import { createInterface } from "node:readline";
 import { prepareWorkflowRun } from "./index.ts";
 
 export interface WorkflowArgs {
+	ask?: boolean;
 	protect?: string[];
 	skills?: string[];
 	workflow: string;
@@ -21,8 +23,10 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 	const values: Record<string, string> = {};
 	const vars: Record<string, string> = {};
 	let noPause = false;
+	let ask = false;
 	for (let i = 0; i < argv.length; i++) {
 		const key = argv[i]!;
+		if (key === "--ask") { ask = true; continue; }
 		if (key === "--no-pause") { noPause = true; continue; }
 		if (!["--workflow", "--folder", "--task", "--task-file", "--server", "--model", "--var", "--max-seconds", "--skills", "--protect"].includes(key)) throw new Error(`Unknown option ${key}.`);
 		const value = argv[++i];
@@ -38,18 +42,19 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 	for (const key of ["workflow", "folder", "task"]) if (!values[key]) throw new Error(`Give --${key}.`);
 	const maxSeconds = values["max-seconds"] === undefined ? undefined : Number(values["max-seconds"]);
 	if (maxSeconds !== undefined && (!Number.isFinite(maxSeconds) || maxSeconds <= 0)) throw new Error("--max-seconds must be a positive number.");
-	return { workflow: values.workflow!, folder: values.folder!, task: values.task!, server: values.server ?? "local", model: values.model, skills: values.skills?.split(",").map((name) => name.trim()).filter(Boolean), maxSeconds, noPause, vars, ...(values.protect === undefined ? {} : { protect: values.protect.split(",").map((entry) => entry.trim()).filter(Boolean) }) };
+	return { ...(ask ? { ask: true } : {}), workflow: values.workflow!, folder: values.folder!, task: values.task!, server: values.server ?? "local", model: values.model, skills: values.skills?.split(",").map((name) => name.trim()).filter(Boolean), maxSeconds, noPause, vars, ...(values.protect === undefined ? {} : { protect: values.protect.split(",").map((entry) => entry.trim()).filter(Boolean) }) };
 }
 
-export async function workflowMain(argv: string[]): Promise<number> {
+export async function workflowMain(argv: string[], reader?: (prompt: string) => Promise<string | undefined>): Promise<number> {
 	if (argv.includes("--help")) {
-		console.log("Usage: workflow --workflow file.json --folder path (--task text | --task-file path) [--server name] [--model name] [--var name=value] [--no-pause] [--max-seconds seconds] [--skills a,b] [--protect a,b]\n--max-seconds limits each agent step, not the whole workflow.");
+		console.log("Usage: workflow --workflow file.json --folder path (--task text | --task-file path) [--server name] [--model name] [--var name=value] [--no-pause] [--ask] [--max-seconds seconds] [--skills a,b] [--protect a,b]\n--max-seconds limits each agent step, not the whole workflow.");
 		return 0;
 	}
 	const args = parseWorkflowArgs(argv);
 	const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-	const { run, workflow } = await prepareWorkflowRun({ ...args, root });
-	const stop = () => run.stop();
+	const controller = new AbortController();
+	const { run, workflow } = await prepareWorkflowRun({ ...args, root, onQuestion: questionReader(args.ask === true, reader, controller.signal, () => stop()) });
+	const stop = () => { controller.abort(); run.stop(); };
 	process.once("SIGINT", stop);
 	try {
 		return await new Promise<number>((resolve) => {
@@ -59,6 +64,7 @@ export async function workflowMain(argv: string[]): Promise<number> {
 					for (const line of event.text.split(/\r?\n/)) console.log(`  ${line}`);
 					return;
 				}
+				if (event.type !== "state") return;
 				const state = event.state;
 				for (const [index, step] of state.steps.entries()) {
 					const value = `${step.round}:${step.status}`;

@@ -2,6 +2,8 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentStep, CommandStep, Workflow, WorkflowEvent, WorkflowRunState } from "./shared/api.ts";
 import type { WorkflowRun } from "./shared/engine.ts";
+import { randomUUID } from "node:crypto";
+import type { Question } from "./types.ts";
 import type { Exec } from "./types.ts";
 import { simHints } from "./tools/sim_hints.ts";
 import { loadSkills, validateSkillNames } from "./skills.ts";
@@ -26,11 +28,13 @@ export async function prepareWorkflowSkills(workflow: Workflow, names: string[] 
 }
 
 export interface WorkflowDeps {
+	interactiveQuestions?: boolean;
+	onQuestion?: (question: Question) => Promise<string | undefined>;
 	/** Absolute project folder used by commands. */
 	workspace: string;
 	exec: Exec;
 	/** Runs an agent with fresh context and reports one line per tool call. */
-	runAgent(step: AgentStep, task: string, signal: AbortSignal, onLine: (line: string) => void): Promise<{ ok: boolean; text: string; limit?: "time" | "turns" }>;
+	runAgent(step: AgentStep, task: string, signal: AbortSignal, onLine: (line: string) => void, onQuestion?: (question: Question) => Promise<string | undefined>, questionBudget?: { used: number }): Promise<{ ok: boolean; text: string; limit?: "time" | "turns" }>;
 }
 
 export function fillPlaceholders(text: string, vars: Record<string, string>): string {
@@ -97,6 +101,8 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 	let failure: { name: string; text: string; round: number } | undefined;
 	let controller = new AbortController();
 	let buildCreated = false;
+	const questionBudget = { used: 0 };
+	let pending: { id: string; resolve: (text: string | undefined) => void } | undefined;
 
 	function emit(event: WorkflowEvent): void {
 		events.push(structuredClone(event));
@@ -130,6 +136,7 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 				continue;
 			}
 			const started = Date.now();
+			let waited = 0;
 			let outcome: { ok: boolean; text: string };
 			try {
 				if (step.type === "agent") {
@@ -138,9 +145,36 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 					const settings = count > 0 && step.retry ? { ...step, ...step.retry, extra: { ...step.extra, ...step.retry.extra } } : step;
 					let taskText = fillPlaceholders(settings.task, vars);
 					if (failure) taskText += `\n\nThe check "${failure.name}" failed in round ${failure.round}:\n${failure.text}\n\nEarlier attempts:\n${attempts.join("\n")}\nFix the problem.`;
-					const result = await deps.runAgent(settings, taskText, owner.signal, (text) => {
+					const onLine = (text: string) => {
 						if (active(owner)) emit({ type: "line", stepId: step.id, text });
-					});
+					};
+					const onQuestion = deps.interactiveQuestions || deps.onQuestion ? async (question: Question) => {
+						if (owner.signal.aborted) return undefined;
+						const id = randomUUID();
+						const begin = Date.now();
+						let resolveAnswer!: (text: string | undefined) => void;
+						const answer = new Promise<string | undefined>((resolve) => { resolveAnswer = resolve; });
+						pending = { id, resolve: resolveAnswer };
+						const abort = () => resolveAnswer(undefined);
+						owner.signal.addEventListener("abort", abort, { once: true });
+						state.status = "waiting";
+						emitState();
+						if (!owner.signal.aborted) emit({ type: "question", id, stepId: step.id, ...question, answer: null, pending: true });
+						try {
+							if (deps.onQuestion && !owner.signal.aborted) Promise.resolve().then(() => owner.signal.aborted ? undefined : deps.onQuestion!(question)).then(resolveAnswer, () => resolveAnswer(undefined));
+							const text = await answer;
+							if (owner === controller) emit({ type: "question", id, stepId: step.id, ...question, answer: text ?? null, pending: false });
+							return text;
+						} finally {
+							waited += Date.now() - begin;
+							if (pending?.id === id) pending = undefined;
+							owner.signal.removeEventListener("abort", abort);
+							if (owner === controller && !owner.signal.aborted) { state.status = "running"; emitState(); }
+						}
+					} : undefined;
+					const result = await (onQuestion
+						? deps.runAgent(settings, taskText, owner.signal, onLine, onQuestion, questionBudget)
+						: deps.runAgent(settings, taskText, owner.signal, onLine));
 					if (!active(owner)) return;
 					const checksDecide = result.limit !== undefined && workflow.steps.slice(index + 1).some((next) => next.type === "command");
 					if (checksDecide) {
@@ -163,7 +197,7 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 				outcome = { ok: false, text: error instanceof Error ? error.message : String(error) };
 			}
 			if (!active(owner)) return;
-			state.steps[index] = { stepId: step.id, status: outcome.ok ? "passed" : "failed", round: state.round, text: outcome.text, ms: Date.now() - started };
+			state.steps[index] = { stepId: step.id, status: outcome.ok ? "passed" : "failed", round: state.round, text: outcome.text, ms: Date.now() - started - waited };
 			if (outcome.ok) {
 				passed.set(step.id, state.round);
 				// Once the failed check passes, later agent steps no longer need its report.
@@ -215,9 +249,10 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 			return () => { listeners.delete(listener); };
 		},
 		start() {
-			if (state.status === "running" || state.status === "paused") return;
+			if (state.status === "running" || state.status === "waiting" || state.status === "paused") return;
 			controller.abort();
 			controller = new AbortController();
+			questionBudget.used = 0;
 			passed.clear();
 			agentRuns.clear();
 			lastAgent.clear();
@@ -248,8 +283,15 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 			emitState();
 			void loop(index, owner);
 		},
+		answer(id: string, text: string) {
+			if (!text.trim() || pending?.id !== id) return false;
+			const current = pending;
+			pending = undefined;
+			current.resolve(text.trim());
+			return true;
+		},
 		stop() {
-			if (state.status !== "running" && state.status !== "paused") return;
+			if (state.status !== "running" && state.status !== "waiting" && state.status !== "paused") return;
 			controller.abort();
 			state.status = "stopped";
 			for (const step of state.steps) if (step.status === "running") step.status = "waiting";

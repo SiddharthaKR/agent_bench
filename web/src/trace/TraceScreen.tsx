@@ -24,7 +24,7 @@ function TimelineRow({ row }: { row: TraceRow }) {
 	return (
 		<div className={`trace-event card${isTraceError(row.kind) ? " trace-event-error" : ""}`}>
 			<button type="button" className="trace-row" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-				<span className="trace-direction small muted">{row.direction === "sent" ? "agent → model" : "model → agent"}</span>
+				<span className="trace-direction small muted">{row.kind === "question" ? "agent / user" : row.direction === "sent" ? "agent → model" : "model → agent"}</span>
 				<span className="trace-tag" data-kind={row.kind}>{row.kind}</span>
 				<span className="trace-title">{row.title || row.kind}</span>
 				<span className="small muted">#{row.call}</span>
@@ -115,7 +115,7 @@ export function TraceScreen(_props: ScreenProps) {
 				</aside>
 				<div className="trace-content">
 					<div className="trace-stats">
-						{[["LLM calls", current?.info.modelCalls ?? 0], ["Context (last)", formatTokens(current?.contextTokens ?? 0)], ["Tool errors", current?.info.toolErrors ?? 0], ["Elapsed", formatElapsed(current?.elapsedMs ?? 0)]].map(([label, value]) => <div className="card trace-stat" key={label}><div className="label">{label}</div><div>{value}</div></div>)}
+						{[["Questions", current?.info.questions ?? 0], ["Unanswered", current?.info.unanswered ?? 0], ["LLM calls", current?.info.modelCalls ?? 0], ["Context (last)", formatTokens(current?.contextTokens ?? 0)], ["Tool errors", current?.info.toolErrors ?? 0], ["Elapsed", formatElapsed(current?.elapsedMs ?? 0)]].map(([label, value]) => <div className="card trace-stat" key={label}><div className="label">{label}</div><div>{value}</div></div>)}
 					</div>
 					<div className="trace-timeline">
 						{rows.length === 0 ? <p className="muted">Nothing to show.</p> : rows.map((row) => <TimelineRow key={`${selected}:${row.id}`} row={row} />)}

@@ -35,8 +35,14 @@ export function createTrace(rootDir: string, label: string, now: Date = new Date
 	let count = 0;
 	let closed = false;
 
+	const updateSummary = (summary: Record<string, unknown>): void => {
+		try { writeFileSync(path.join(dir, "summary.json"), JSON.stringify({ ...summary, events: count }, null, "\t") + "\n"); }
+		catch { /* Tracing must never break a run. */ }
+	};
+
 	return {
 		dir,
+		updateSummary,
 		write(event: TraceEvent): void {
 			if (closed) return;
 			try {
@@ -53,12 +59,7 @@ export function createTrace(rootDir: string, label: string, now: Date = new Date
 		close(summary: Record<string, unknown>): void {
 			if (closed) return;
 			closed = true;
-			try {
-				const out = { ...summary, events: count };
-				writeFileSync(path.join(dir, "summary.json"), JSON.stringify(out, null, "\t") + "\n");
-			} catch {
-				// Tracing must never break a run.
-			}
+			updateSummary(summary);
 		},
 	};
 }
