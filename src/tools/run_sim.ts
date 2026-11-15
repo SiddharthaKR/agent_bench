@@ -1,5 +1,5 @@
 import type { ToolSpec } from "../types.ts";
-import { compileFiles, expandCommand, lintFiles, OUT_PATH, outputLines } from "./compile.ts";
+import { compileFiles, expandCommand, interfaceHints, lintFiles, OUT_PATH, outputLines } from "./compile.ts";
 import { simHints } from "./sim_hints.ts";
 
 const TIMEOUT_MS = 120_000;
@@ -21,13 +21,14 @@ export const runSim: ToolSpec = {
 	async run(args, ctx) {
 		const built = await compileFiles(args.files, ctx);
 		if (!built.ok) return { ok: false, text: built.text };
+		const failed = async (text: string) => ({ ok: false, text: [text, ...await interfaceHints(built.files, ctx)].join("\n") });
 
 		const template = ctx.commands.simulate;
-		if (template.length === 0) return { ok: false, text: "No simulate command is configured." };
+		if (template.length === 0) return failed("No simulate command is configured.");
 		const { program, args: simArgs } = expandCommand(template, [], OUT_PATH);
 		const r = await ctx.exec(program, simArgs, { cwd: ctx.workspace, timeoutMs: TIMEOUT_MS, signal: ctx.signal });
-		if (r.notFound) return { ok: false, text: `The simulator "${program}" is not installed on this machine.` };
-		if (r.timedOut) return { ok: false, text: "Simulation timed out after 120 s." };
+		if (r.notFound) return failed(`The simulator "${program}" is not installed on this machine.`);
+		if (r.timedOut) return failed("Simulation timed out after 120 s.");
 
 		const lines = outputLines(r.stdout, r.stderr);
 		const failures = lines.filter((l) => FAIL_RE.test(l));
@@ -43,7 +44,7 @@ export const runSim: ToolSpec = {
 				failures.length > 0
 					? [...failures.slice(0, 10), ...(failures.length > 10 ? [`(${failures.length - 10} more lines not shown)`] : [])]
 					: tail(lines, 5);
-			const hints = [...await lintFiles(built.files, ctx.workspace), ...simHints(failures)].slice(0, 3);
+			const hints = [...await interfaceHints(built.files, ctx), ...await lintFiles(built.files, ctx.workspace), ...simHints(failures)].slice(0, 3);
 			return { ok: false, text: [head, ...body, ...hints].join("\n") };
 		}
 		if (passes.length === 0) {

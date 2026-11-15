@@ -34,21 +34,27 @@ export const readFile: ToolSpec = {
 		}
 
 		let lines: string[];
+		let source: string;
 		try {
 			if ((await fs.stat(p.abs)).isDirectory()) {
 				return { ok: false, text: `${p.rel} is a folder, not a file.` };
 			}
-			lines = splitLines(await fs.readFile(p.abs, "utf8"));
+			source = await fs.readFile(p.abs, "utf8");
+			lines = splitLines(source);
 		} catch (err) {
 			if (isNotFound(err)) return { ok: false, text: `File not found: ${p.rel}` };
 			return { ok: false, text: `Could not read ${p.rel}: ${(err as Error).message}` };
 		}
 
 		const total = lines.length;
-		if (total === 0) return { ok: true, text: `${p.rel} is empty (0 lines).` };
+		if (total === 0) {
+			if (/\.(md|txt)$/i.test(p.rel)) (ctx.specTexts ??= new Map()).set(p.rel, source);
+			return { ok: true, text: `${p.rel} is empty (0 lines).` };
+		}
 		if (from > total) {
 			return { ok: false, text: `${p.rel} has ${total} lines; from ${from} is past the end.` };
 		}
+		if (/\.(md|txt)$/i.test(p.rel)) (ctx.specTexts ??= new Map()).set(p.rel, source);
 
 		const wanted = Math.min(to ?? total, total);
 		const end = Math.min(wanted, from + MAX_LINES - 1);

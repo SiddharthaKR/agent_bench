@@ -176,6 +176,17 @@ function benchmarkRevision() {
 	return fs.existsSync(packed) ? read(packed).split(/\r?\n/).find((line) => line.endsWith(` ${ref}`))?.split(" ")[0] ?? "unknown" : "unknown";
 }
 
+async function checkQuality(candidate, prompt, commands, print) {
+	if (!fs.existsSync(candidate)) return undefined;
+	const { specHeaders } = await import("../src/tools/interface.ts");
+	const { qualityReport } = await import("../src/tools/quality.ts");
+	return qualityReport([candidate], {
+		commands,
+		...(specHeaders(read(prompt)).length ? { spec: prompt } : {}),
+		print,
+	});
+}
+
 async function run(argv) {
 	const options = runOptions(argv);
 	const names = problemNames();
@@ -219,7 +230,12 @@ async function run(argv) {
 			const timedOut = agent.timedOut || /Ended: time/.test(log) || metrics.endedByTime;
 			const test = path.join(dataset, `${name}_test.sv`);
 			const verdict = judge(path.join(project, "rtl/TopModule.sv"), test, path.join(dataset, `${name}_ref.sv`), path.join(folder, "judge"), cfg.commands, timedOut);
+			const candidate = path.join(project, "rtl/TopModule.sv");
+			const prompt = path.join(dataset, `${name}_prompt.txt`);
+			const quality = await checkQuality(candidate, prompt, cfg.commands, text => fs.writeFileSync(path.join(folder, "quality.log"), text + "\n"));
 			const row = { when: new Date().toISOString(), suite: "verilog-eval", level: split.dev.includes(name) ? "dev" : "heldout", task: name, server: options.server, model, setup, pass: verdict === "PASS", verdict, toolCalls: metrics.calls, seconds: (Date.now() - start) / 1000, trace: traces, endedByTime: timedOut, attempt, hints: metrics.hints };
+			row.quality = quality ? quality.pass ? "pass" : "fail" : "skipped";
+			row.qualityFindings = quality?.findings.length ?? 0;
 			save(path.join(folder, "result.json"), row);
 			rows.push(row);
 			const recorded = execute([process.execPath, "src/cli-result.ts", "--suite", row.suite, "--level", row.level, "--task", name, "--server", row.server, "--model", model, "--setup", setup, "--verdict", verdict, "--tool-calls", String(row.toolCalls), "--seconds", String(row.seconds), "--trace", traces], root);
@@ -362,6 +378,15 @@ async function selfTest() {
 		assert.equal(judge(candidate, test, reference, path.join(temp, "mismatch"), cfg.commands), "MISMATCH");
 		fs.writeFileSync(candidate, "module TopModule; endmodule\n");
 		assert.equal(judge(candidate, test, reference, path.join(temp, "empty"), cfg.commands), "COMPILE_ERROR");
+		const prompt = path.join(temp, "spec.md");
+		fs.writeFileSync(candidate, "module TopModule(output wrong); assign wrong=1'b0; endmodule\n");
+		fs.writeFileSync(prompt, "```verilog\nmodule TopModule(output q);\n```\n");
+		const withHeader = await checkQuality(candidate, prompt, cfg.commands, () => {});
+		assert.ok(withHeader.findings.some(finding => finding.rule === "interface"));
+		fs.writeFileSync(prompt, "Provide an output named q.\n");
+		const prose = await checkQuality(candidate, prompt, cfg.commands, () => {});
+		assert.ok(!prose.findings.some(finding => finding.rule === "interface"));
+		assert.equal(await checkQuality(path.join(temp, "absent.sv"), prompt, cfg.commands, () => {}), undefined);
 		const dev = namesIn(path.join(splitDir, "dev.txt"))[0] ?? "synthetic_dev";
 		for (let i = 0; i < 40; i++) {
 			const folder = path.join(temp, "report", `p${i}`);

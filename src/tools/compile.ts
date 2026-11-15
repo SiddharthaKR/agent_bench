@@ -4,6 +4,7 @@ import type { ToolContext, ToolOutput, ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { splitLines, trimLine } from "./util.ts";
 import { lintVerilog } from "./lint.ts";
+import { checkInterface } from "./interface.ts";
 
 export const OUT_PATH = ".build/sim.out";
 const TIMEOUT_MS = 60_000;
@@ -62,25 +63,46 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 
 	const { program, args } = expandCommand(ctx.commands.compile, rels, OUT_PATH);
 	const r = await ctx.exec(program, args, { cwd: ctx.workspace, timeoutMs: TIMEOUT_MS, signal: ctx.signal });
-	if (r.notFound) return fail(`The compiler "${program}" is not installed on this machine.`);
-	if (r.timedOut) return fail("Compile timed out after 60 s.");
+	const interfaces = await interfaceHints(rels, ctx);
+	const failed = (text: string) => fail([text, ...interfaces].join("\n"));
+	if (r.notFound) return failed(`The compiler "${program}" is not installed on this machine.`);
+	if (r.timedOut) return failed("Compile timed out after 60 s.");
 
 	const lines = outputLines(r.stderr, r.stdout);
 	if (r.code === 0) {
 		let text = "Compiled, 0 errors.";
 		if (lines.length > 0) text += ` ${lines.length} warning lines; first: ${lines[0]}`;
-		const hints = await lintFiles(rels, ctx.workspace);
+		const hints = [...interfaces, ...await lintFiles(rels, ctx.workspace)].slice(0, 3);
 		if (hints.length > 0) text += `\n${hints.join("\n")}`;
 		return { ok: true, text, files: rels };
 	}
-	if (lines.length === 0) return fail("Compile failed with no messages.");
-	const shown = await withSource(lines.slice(0, SHOWN), rels, ctx.workspace, ctx.smallFileLines ?? 150, lines);
+	if (lines.length === 0) return failed("Compile failed with no messages.");
+	const shown = await withSource(lines.slice(0, SHOWN), rels, ctx.workspace, ctx.smallFileLines ?? 150, lines, 2 - interfaces.length);
 	let text = `Compile failed, ${lines.length} message lines.\n${shown.join("\n")}`;
 	if (lines.length > SHOWN) text += `\n(${lines.length - SHOWN} more lines not shown)`;
+	const remaining = 2 - interfaces.length - shown.filter(line => line.startsWith("Hint: ")).length;
+	text += [...interfaces, ...(await lintFiles(rels, ctx.workspace)).slice(0, remaining)].map(hint => `\n${hint}`).join("");
 	return fail(text);
 }
 
 const SOURCE_ECHOES = 3;
+
+export async function interfaceHints(files: string[], ctx: ToolContext): Promise<string[]> {
+	if (!ctx.specTexts?.size) return [];
+	const hints = new Set<string>();
+	for (const file of files) {
+		if (!/\.(v|sv)$/i.test(file)) continue;
+		const resolved = resolveInWorkspace(ctx.workspace, file);
+		if (!resolved.ok) continue;
+		try {
+			const source = await fs.readFile(resolved.abs, "utf8");
+			for (const spec of ctx.specTexts.values()) {
+				for (const hint of checkInterface(spec, source)) hints.add(hint);
+			}
+		} catch { /* Advice must not change the tool outcome if a file disappears. */ }
+	}
+	return [...hints].slice(0, 2);
+}
 
 export async function lintFiles(files: string[], workspace: string): Promise<string[]> {
 	const hints: string[] = [];
@@ -100,7 +122,7 @@ export async function lintFiles(files: string[], workspace: string): Promise<str
  * Puts the offending source line under a message like `rtl/gain.v:45: syntax error`,
  * so the model can fix the right line without reading the file again.
  */
-async function withSource(messages: string[], rels: string[], workspace: string, limit: number, allMessages: string[]): Promise<string[]> {
+async function withSource(messages: string[], rels: string[], workspace: string, limit: number, allMessages: string[], maxHints: number): Promise<string[]> {
 	const out: string[] = [];
 	const seen = new Set<string>();
 	const cache = new Map<string, string[]>();
@@ -127,12 +149,19 @@ async function withSource(messages: string[], rels: string[], workspace: string,
 		seen.add(key);
 		out.push(`    ${lineNo}| ${trimLine(line)}`);
 		const hint = compileHint(message, line, source.slice(0, lineNo).join("\n"));
-		if (hint && hints < 2) {
+		if (hint && hints < maxHints) {
 			out.push(`Hint: ${hint}`);
 			hints++;
 		}
 	}
-	if (hints < 2 && limit > 0) {
+	for (const message of allMessages) {
+		const hint = diagnosticHint(message);
+		if (hint && hints < maxHints && !out.includes(`Hint: ${hint}`)) {
+			out.push(`Hint: ${hint}`);
+			hints++;
+		}
+	}
+	if (hints < maxHints && limit > 0) {
 		for (const message of allMessages) {
 			const match = /^(.+?):\d+:/.exec(message);
 			if (!match) continue;
@@ -151,6 +180,8 @@ async function withSource(messages: string[], rels: string[], workspace: string,
 }
 
 function compileHint(message: string, line: string, prefix: string): string | undefined {
+	const diagnostic = diagnosticHint(message);
+	if (diagnostic) return diagnostic;
 	if (/syntax error/i.test(message) && /\d+\s*'s?[dh]\s*-/i.test(line)) return "a sized constant cannot contain a minus sign. Write the value as a plain signed decimal, for example -8192.";
 	const rules: [RegExp, string][] = [
 		[/is not a valid l-value/i, "only a reg can be assigned in an always block; a wire needs assign."],
@@ -159,6 +190,12 @@ function compileHint(message: string, line: string, prefix: string): string | un
 	];
 	for (const [pattern, hint] of rules) if (pattern.test(message)) return hint;
 	if (/syntax error/i.test(message) && /^\s*(?:localparam|parameter|wire|reg|integer|genvar)\b/.test(line) && insideAlways(prefix)) return "declare localparam, parameter, wire, reg and integer at module level, before the always block.";
+	return undefined;
+}
+
+function diagnosticHint(message: string): string | undefined {
+	if (/Include file .+ not found/i.test(message)) return "do not use `include. Give every file to compile or run_sim in the files argument instead.";
+	if (/concatenation operand.*has indefinite width/i.test(message)) return "inside { } every constant needs a size, for example 4'd14, not 14 or 'sd14.";
 	return undefined;
 }
 

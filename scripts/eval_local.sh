@@ -94,11 +94,11 @@ NODE
 	quality=skipped
 	quality_findings=0
 	if [[ -f "$temp/$design" ]]; then
-		node --input-type=module - "$(native "$temp/$design")" >"$temp/quality.log" 2>&1 <<'NODE'
+		node --input-type=module - "$(native "$temp/$design")" "$(native "$root/evals/$suite/spec.md")" >"$temp/quality.log" 2>&1 <<'NODE'
 import { loadConfig } from "./src/config.ts";
 import { qualityReport } from "./src/tools/quality.ts";
 const config = await loadConfig(process.cwd());
-const report = await qualityReport([process.argv[2]], { commands: config.commands });
+const report = await qualityReport([process.argv[2]], { spec: process.argv[3], commands: config.commands });
 console.log(`RESULT ${report.pass ? "pass" : "fail"} ${report.findings.length}`);
 NODE
 		if [[ "$?" == 0 ]]; then

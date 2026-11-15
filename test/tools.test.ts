@@ -87,6 +87,14 @@ it.each([149, 150, 151])("adds a long-file compile hint only above the limit: %s
 });
 
 describe("compile hints", () => {
+	it.each([
+		["Include file defs.vh not found", "do not use `include. Give every file to compile or run_sim in the files argument instead."],
+		["Concatenation operand has indefinite width.", "inside { } every constant needs a size, for example 4'd14, not 14 or 'sd14."],
+	])("explains %s without a source location", async (message, hint) => {
+		await put("a.v", "module a; endmodule");
+		const { ctx } = fakeCtx([res({ code: 1, stderr: message })]);
+		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain(`Hint: ${hint}`);
+	});
 	it.each(["16'sd-32768", "16'd-2", "16'sh-8000", "16'h-2"])("explains negative sized literal %s", async (literal) => {
 		await put("a.v", `module a;\nlocalparam X = ${literal};\nendmodule`);
 		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:2: syntax error" })]);
@@ -119,6 +127,57 @@ describe("compile hints", () => {
 		const text = (await compile.run({ files: "a.v" }, ctx)).text;
 		expect(text).not.toContain("declare wires");
 		expect((text.match(/Hint:/g) ?? []).length).toBeLessThanOrEqual(2);
+	});
+});
+
+describe("remembered spec interfaces", () => {
+	it.each([0, 1])("checks compile with exit code %s only after reading a spec", async code => {
+		await put("spec.md", "```\nmodule a(input signed [13:0] x);\n```");
+		await put("a.v", "module a(input [13:0] x); endmodule");
+		const { ctx } = fakeCtx([res({ code }), res({ code })]);
+		expect((await compile.run({ files: "a.v" }, ctx)).text).not.toContain("must keep the ports");
+		await readFile.run({ path: "spec.md" }, ctx);
+		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("must keep the ports");
+	});
+	it("remembers text rather than re-reading the changed spec, and skips other extensions", async () => {
+		await put("spec.txt", "```\nmodule a(input x);\n```");
+		await put("other.v", "```\nmodule other(input x);\n```");
+		await put("a.v", "module a(input y); endmodule");
+		const { ctx } = fakeCtx([]);
+		await readFile.run({ path: "other.v" }, ctx);
+		expect((await compile.run({ files: "a.v" }, ctx)).text).not.toContain("Use the name from the spec");
+		await readFile.run({ path: "spec.txt" }, ctx);
+		await put("spec.txt", "changed");
+		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("Missing: x. Extra: y.");
+		expect((await compile.run({ files: "a.v" }, fakeCtx([]).ctx)).text).not.toContain("must keep the ports");
+	});
+	it("places interface hints before lint within the compile and simulation caps", async () => {
+		await put("spec.md", "```\nmodule a(input x, output y); module b(input x); module c(input x);\n```");
+		await put("a.v", "module a(input z, output y); endmodule");
+		for (const tool of [compile, runSim]) {
+			const { ctx } = fakeCtx([res(), res({ stdout: "FAIL mismatch" })]);
+			await readFile.run({ path: "spec.md" }, ctx);
+			const text = (await tool.run({ files: "a.v" }, ctx)).text;
+			expect(text).toContain("must keep the ports");
+			expect(text.indexOf("must keep the ports")).toBeLessThan(text.indexOf("never assigned"));
+			expect(text.match(/Hint: /g)?.length).toBeLessThanOrEqual(3);
+		}
+	});
+	it("keeps the failure hint cap when compiler diagnostics and interfaces compete", async () => {
+		await put("spec.md", "```\nmodule a(input x); module b(input y);\n```");
+		await put("a.v", "module a(input z); endmodule");
+		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:1: Include file x.vh not found" })]);
+		await readFile.run({ path: "spec.md" }, ctx);
+		const text = (await compile.run({ files: "a.v" }, ctx)).text;
+		expect(text.match(/Hint: /g)).toHaveLength(2);
+		expect(text).toContain("must keep the ports");
+	});
+	it("checks a remembered interface when simulation times out", async () => {
+		await put("spec.md", "```\nmodule a(input x);\n```");
+		await put("a.v", "module a(input y); endmodule");
+		const { ctx } = fakeCtx([res(), res({ timedOut: true })]);
+		await readFile.run({ path: "spec.md" }, ctx);
+		expect((await runSim.run({ files: "a.v" }, ctx)).text).toContain("Missing: x. Extra: y.");
 	});
 });
 

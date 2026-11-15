@@ -34,7 +34,7 @@ for (const name of fs.readdirSync(path.join(root, "evals")).sort()) {
 		}
 		ok &&= /ALL TESTS PASSED/.test(output) && !/\b(?:FAIL|FAILED|ERROR|MISMATCH)\b/i.test(output);
 		console.log(`${name} quality:`);
-		const quality = await qualityReport([files[0]], { commands, cwd: root });
+		const quality = await qualityReport([files[0]], { spec: path.join(root, "evals", name, "spec.md"), commands, cwd: root });
 		ok &&= quality.pass;
 	} catch (error) { ok = false; output += String(error); }
 	finally { fs.rmSync(folder, { recursive: true, force: true }); }

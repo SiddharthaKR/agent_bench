@@ -108,6 +108,7 @@ export function hasUnsavedCode(message: AssistantMessage): boolean {
 }
 
 export function toAgentTool(spec: ToolSpec, ctx: ToolContext): AgentTool {
+	ctx.specTexts ??= new Map();
 	const props: Record<string, any> = {};
 	for (const arg of spec.args) {
 		const base = arg.type === "number" ? Type.Number() : Type.String();

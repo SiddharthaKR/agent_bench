@@ -27,6 +27,18 @@ function fakeModel(replies: string[] | ((n: number) => string)) {
 
 const okExec: Exec = async () => ({ code: 0, stdout: "", stderr: "", timedOut: false, notFound: false }) satisfies ExecResult;
 
+it("keeps read specs across tool context copies", async () => {
+	await writeFile(path.join(workspace, "spec.md"), "```\nmodule m(input a);\n```");
+	await writeFile(path.join(workspace, "m.v"), "module m(input b); endmodule");
+	const model = fakeModel([
+		"@tool read_file\npath: spec.md\n@end",
+		"@tool compile\nfiles: m.v\n@end",
+		"Done.",
+	]);
+	await run(model);
+	expect(JSON.stringify(model.requests)).toContain("Missing: a. Extra: b.");
+});
+
 let root: string;
 let agentDir: string;
 let workspace: string;

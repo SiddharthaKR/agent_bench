@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { qualityLint } from "../src/tools/lint.ts";
 import { qualityReport } from "../src/tools/quality.ts";
 import type { Exec } from "../src/types.ts";
@@ -84,6 +87,24 @@ describe("quality lint", () => {
 });
 
 describe("quality report", () => {
+	it("fails the interface rule with a spec file and accepts matching headers", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "quality-interface-"));
+		try {
+			await writeFile(path.join(cwd, "spec.md"), "```\nmodule m(input a, output y);\n```");
+			await writeFile(path.join(cwd, "m.v"), "module m(input b, output y); assign y=b; endmodule");
+			const exec: Exec = async () => ({ code: 0, stdout: "", stderr: "", timedOut: false, notFound: false });
+			const options = { cwd, exec, commands: {}, print: () => {} };
+			expect((await qualityReport(["m.v"], options)).pass).toBe(true);
+			const report = await qualityReport(["m.v"], { ...options, spec: "spec.md" });
+			expect(report.pass).toBe(false);
+			expect(report.findings).toContainEqual(expect.objectContaining({ rule: "interface", severity: "error", file: "m.v" }));
+			const cli = spawnSync(process.execPath, ["src/cli-quality.ts", "--spec", path.join(cwd, "spec.md"), path.join(cwd, "m.v")], { encoding: "utf8" });
+			expect(cli.status, cli.stderr).toBe(1);
+			expect(cli.stdout).toContain("interface:");
+			await writeFile(path.join(cwd, "m.v"), "module m(input a, output y); assign y=a; endmodule");
+			expect((await qualityReport(["m.v"], { ...options, spec: "spec.md" })).pass).toBe(true);
+		} finally { await rm(cwd, { recursive: true, force: true }); }
+	});
 	it("uses repository configuration when no command override is supplied", async () => {
 		const calls: string[] = [];
 		const exec: Exec = async command => {

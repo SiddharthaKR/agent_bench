@@ -7,6 +7,7 @@ import type { QualityCommands } from "../shared/api.ts";
 import type { CommandConfig, Exec } from "../types.ts";
 import { realExec } from "./exec.ts";
 import { qualityLint, type LintFinding } from "./lint.ts";
+import { checkInterface } from "./interface.ts";
 
 export interface QualityFinding extends LintFinding {
 	file: string;
@@ -21,11 +22,16 @@ export interface QualityReport {
 
 const FAIL_CODES = new Set(["LATCH", "MULTIDRIVEN", "BLKSEQ", "COMBDLY", "WIDTH", "UNDRIVEN", "CASEINCOMPLETE"]);
 
-export async function qualityReport(files: string[], options: { commands?: QualityCommands & Partial<CommandConfig>; exec?: Exec; cwd?: string; print?: (text: string) => void } = {}): Promise<QualityReport> {
+export async function qualityReport(files: string[], options: { spec?: string; commands?: QualityCommands & Partial<CommandConfig>; exec?: Exec; cwd?: string; print?: (text: string) => void } = {}): Promise<QualityReport> {
 	if (!files.length) throw new Error("Give at least one RTL file.");
 	const cwd = options.cwd ?? process.cwd();
 	const findings: QualityFinding[] = [];
-	for (const file of files) findings.push(...qualityLint(await readFile(path.resolve(cwd, file), "utf8")).map(f => ({ file, ...f })));
+	const spec = options.spec === undefined ? undefined : await readFile(path.resolve(cwd, options.spec), "utf8");
+	for (const file of files) {
+		const source = await readFile(path.resolve(cwd, file), "utf8");
+		if (spec !== undefined) findings.push(...checkInterface(spec, source).map(message => ({ file, line: 1, rule: "interface", severity: "error" as const, message })));
+		findings.push(...qualityLint(source).map(f => ({ file, ...f })));
+	}
 	const ran: string[] = [];
 	const exec = options.exec ?? realExec;
 	const commands = options.commands ?? (await loadConfig(fileURLToPath(new URL("../../", import.meta.url)))).commands;

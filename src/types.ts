@@ -49,6 +49,8 @@ export interface CommandConfig {
 }
 
 export interface ToolContext {
+	/** Text of spec files read during this run, shared across tool calls. */
+	specTexts?: Map<string, string>;
 	onQuestion?: (question: Question, signal?: AbortSignal) => Promise<string | undefined>;
 	/** Absolute path of the project folder. Tools must never touch files outside it. */
 	workspace: string;
