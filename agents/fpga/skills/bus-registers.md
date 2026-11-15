@@ -1,28 +1,55 @@
 ---
 name: bus-registers
-description: Load when implementing a bus handshake, address map, writable registers or register read-back.
+description: Load when the module has a bus, an address map, writable registers or register read-back.
 always: false
 ---
-Implement the handshake exactly as specified: request acceptance, strobe width, acknowledge timing, read latency and behavior under back-to-back requests. Do not add a ready signal, wait state or output register unless the contract allows it. If byte enables exist, update only the selected bytes. If a request can remain asserted, follow the specified acceptance rule so one transfer is not accidentally repeated.
+Implement the handshake exactly as the spec states it: when ack rises, the read latency, the strobe width. Do not add a ready signal or a wait state the spec does not have.
 
-Decode the full address width defined by the spec. Comparing only low bits can alias unrelated addresses. Use named address constants of the correct width. For unknown or unaligned addresses, return the specified data and response; do not assume every bus returns zero. Respect read-only, write-only and write-one-to-clear semantics when specified.
+Go through the register table row by row and implement every row:
+- Decode the full address width with named constants. Comparing only low bits aliases other addresses.
+- Read-back format per row: a signed N-bit value on a wider bus copies its sign bit into all upper bits; an unsigned one gets zeros. A slice or a concatenation is unsigned, so build the sign extension explicitly.
+- Read-only constants return their value. Unknown addresses return what the spec says, usually 0, never the address or stale data.
+- Reset values exactly as given. Writes to read-only or unknown addresses change nothing.
 
-For signed N-bit values exposed on a wider W-bit bus, sign-extend before read-back. If the bus register is defined as unsigned, zero-extend instead. A slice or concatenation is unsigned in expressions; cast only when subsequent signed arithmetic requires it.
+Worked module: write, registered read one clock later, ack. Names, widths and addresses are an example; keep the structure.
 
-If the spec requires combinational reads and zero for unmapped addresses, use this pattern:
 ```verilog
-module register_read(input [15:0] address,
-	input signed [11:0] gain,
-	output reg [31:0] read_data);
-	localparam [15:0] GAIN_ADDR = 16'h0010;
-	always @* begin
-		read_data = 32'd0;
-		case (address)
-			GAIN_ADDR: read_data = {{20{gain[11]}}, gain};
-			default: read_data = 32'd0;
-		endcase
+module regs (
+	input                    clk,
+	input                    rst,
+	input             [15:0] addr,
+	input                    wen,
+	input                    ren,
+	input             [31:0] wdata,
+	output reg               ack,
+	output reg        [31:0] rdata,
+	output reg signed [11:0] gain,
+	output reg         [3:0] mode
+);
+	localparam [15:0] GAIN_ADDR = 16'h0010, MODE_ADDR = 16'h0014, ID_ADDR = 16'h0020;
+	always @(posedge clk) begin
+		if (rst) begin
+			gain <= 12'sd0; mode <= 4'd0; ack <= 1'b0; rdata <= 32'd0;
+		end else begin
+			ack <= wen | ren;
+			if (wen) begin
+				case (addr)
+					GAIN_ADDR: gain <= wdata[11:0];
+					MODE_ADDR: mode <= wdata[3:0];
+					default: ;                             // ignored
+				endcase
+			end
+			case (addr)
+				GAIN_ADDR: rdata <= {{20{gain[11]}}, gain};   // signed: copy the sign bit
+				MODE_ADDR: rdata <= {28'd0, mode};            // unsigned: zeros
+				ID_ADDR:   rdata <= 32'd7;                    // read-only constant
+				default:   rdata <= 32'd0;                    // unknown address
+			endcase
+		end
 	end
 endmodule
 ```
 
-Test each register's reset value, then write and read it back using the actual handshake and read latency. For signed registers include a negative value and check the entire read bus. Test an address differing only in upper bits, unknown addresses, and back-to-back writes and reads. If byte enables or special access semantics exist, test them too.
+Before you finish, check the file against the register table once more: every address, every read-back format, the constant, the unknown-address value, every reset value.
+
+In a testbench: check each reset value, write a negative value to each signed register and compare the whole read bus, read the constant, read an unknown address.

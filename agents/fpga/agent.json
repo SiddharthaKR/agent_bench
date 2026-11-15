@@ -15,6 +15,7 @@
 	"maxSeconds": 600,
 	"skills": [
 		"verilog-rules",
-		"fixed-point"
+		"fixed-point",
+		"bus-registers"
 	]
 }
