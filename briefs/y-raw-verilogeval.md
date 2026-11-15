@@ -33,3 +33,18 @@ It works on any split (this is a comparison of results, not a reading of failure
 - Feeding the benchmark's reference text through the extraction and the judge passes for three problems.
 
 Finish with `npx.cmd tsc --noEmit` and `npx.cmd vitest run`. Report what you created, the test results, and the exact prompt text used.
+
+## Saved for the owner to see and to run on the server (added 2026-11-15)
+
+The owner wants the raw test kept as a saved, repeatable procedure that he can read and run on the office server too. You may also edit `docs/server.md` and add `docs/verilog-eval.md` for this.
+
+- `docs/verilog-eval.md`: one page, plain words. What the raw test is and what the harness test is, in two short lists; the exact messages the raw test sends (system message and the added text, quoted); where results are kept; how to read the comparison table. Then the commands, one per code block, in the order to run them on any machine:
+  1. clone the benchmark into `external/verilog-eval` and check out the recorded commit;
+  2. write the split (`node scripts/verilog_eval_report.mjs --write-split`);
+  3. raw run on the dev set;
+  4. harness run on the dev set;
+  5. the comparison of the two folders;
+  6. the same three for the held-out set.
+  Give each command twice: for this PC (`-s local-fast`) and for the office server (`-s office -m <model id>`), where the model id is the one LM Studio shows.
+- `docs/server.md`: add a short section "VerilogEval: raw model against the harness" that points to that page and lists what the server needs first (the clone, Icarus on PATH, `config.local.json`). Note that thinking on or off is set per server entry in `config.json` through `extra`, and that LM Studio may ignore `reasoning_effort`; say how to see in a trace whether the model thought (the `reasoning` field of a response).
+- Both runners print, as their last line, the folder they wrote, so the comparison command can be copied.
