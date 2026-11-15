@@ -1,6 +1,6 @@
 # Agent Bench: plan and progress
 
-Last updated: 2026-11-15. "Agent Bench" is a working name. Read this file first in a new session.
+Last updated: 2026-11-16. "Agent Bench" is a working name. **Read `HANDOFF.md` first**: it has the current state, the measured results and the ordered next steps. This file keeps the full history and tables.
 
 ## Goal
 
@@ -198,6 +198,8 @@ Raw test (owner's request): `scripts/verilog_eval_raw.sh` sends one request per 
 | Harness (commit c7778f9) | 27 of 39 (69%) | 18.9 | 11 | 0 |
 
 Twelve problems passed only with the harness, none only raw. Of the twelve, six were compile errors in the raw run and six were wrong output. Dev is the set the harness was tuned on, so this gap is an upper estimate; the held-out comparison (117 problems) is the unbiased one and was started at the same time.
+
+**Held-out comparison (117 problems, nothing tuned on them), commit b678872:** raw 49 of 117 (42%, median 3.7 s, 29 compile errors); harness 64 of 117 (55%, median 18.3 s, 2 compile errors, 10 time-outs). 22 problems pass only with the harness, 7 only raw. Tables: `docs/rounds/2026-11-15-raw-vs-harness-heldout.md` and `-dev.md`.
 
 Old harness easy, Gemma 4 E4B, after round 1 (register read-back check): 0 of 4. Two runs did not compile at the judge, one had read-back 8 of 8 but data path 4 of 16. Total so far on this task with E4B: 0 of 30. The harness faults found on the way are fixed (paths, uncompiled files, testbench boilerplate, read-back check); what is left is the model. **Next real step for this task: run it with the 26B model on the server.**
 
