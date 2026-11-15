@@ -1,5 +1,6 @@
 import type { ToolSpec } from "../types.ts";
-import { compileFiles, expandCommand, OUT_PATH, outputLines } from "./compile.ts";
+import { compileFiles, expandCommand, lintFiles, OUT_PATH, outputLines } from "./compile.ts";
+import { simHints } from "./sim_hints.ts";
 
 const TIMEOUT_MS = 120_000;
 const FAIL_RE = /\b(FAIL|FAILED|ERROR|MISMATCH)\b/i;
@@ -42,7 +43,8 @@ export const runSim: ToolSpec = {
 				failures.length > 0
 					? [...failures.slice(0, 10), ...(failures.length > 10 ? [`(${failures.length - 10} more lines not shown)`] : [])]
 					: tail(lines, 5);
-			return { ok: false, text: [head, ...body].join("\n") };
+			const hints = [...await lintFiles(built.files, ctx.workspace), ...simHints(failures)].slice(0, 3);
+			return { ok: false, text: [head, ...body, ...hints].join("\n") };
 		}
 		if (passes.length === 0) {
 			return { ok: true, text: ["Simulation finished with no PASS or FAIL lines.", ...tail(lines, 5)].join("\n") };

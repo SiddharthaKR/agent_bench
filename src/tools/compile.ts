@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { ToolContext, ToolOutput, ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { trimLine } from "./util.ts";
+import { lintVerilog } from "./lint.ts";
 
 export const OUT_PATH = ".build/sim.out";
 const TIMEOUT_MS = 60_000;
@@ -68,6 +69,8 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext): Promise
 	if (r.code === 0) {
 		let text = "Compiled, 0 errors.";
 		if (lines.length > 0) text += ` ${lines.length} warning lines; first: ${lines[0]}`;
+		const hints = await lintFiles(rels, ctx.workspace);
+		if (hints.length > 0) text += `\n${hints.join("\n")}`;
 		return { ok: true, text, files: rels };
 	}
 	if (lines.length === 0) return fail("Compile failed with no messages.");
@@ -78,6 +81,20 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext): Promise
 }
 
 const SOURCE_ECHOES = 3;
+
+export async function lintFiles(files: string[], workspace: string): Promise<string[]> {
+	const hints: string[] = [];
+	for (const file of files) {
+		const resolved = resolveInWorkspace(workspace, file);
+		if (!resolved.ok) continue;
+		try {
+			hints.push(...lintVerilog(await fs.readFile(resolved.abs, "utf8")));
+		} catch {
+			// Lint advice must not change the tool outcome when a file disappears.
+		}
+	}
+	return hints;
+}
 
 /**
  * Puts the offending source line under a message like `rtl/gain.v:45: syntax error`,
@@ -125,7 +142,7 @@ function compileHint(message: string, line: string, prefix: string): string | un
 		[/Syntax in assignment statement l-value/i, "check the line above for a missing semicolon or end."],
 	];
 	for (const [pattern, hint] of rules) if (pattern.test(message)) return hint;
-	if (/syntax error/i.test(message) && /\b(?:reg|wire)\s/.test(line) && insideAlways(prefix)) return "declare wires and regs at module level, not inside always.";
+	if (/syntax error/i.test(message) && /^\s*(?:localparam|parameter|wire|reg|integer|genvar)\b/.test(line) && insideAlways(prefix)) return "declare localparam, parameter, wire, reg and integer at module level, before the always block.";
 	return undefined;
 }
 

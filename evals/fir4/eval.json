@@ -1,0 +1,1 @@
+{ "level": "medium", "design": "rtl/fir4.v", "tb": "tb/tb_fir4.v" }

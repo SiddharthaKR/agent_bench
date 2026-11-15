@@ -3,13 +3,14 @@ import { join } from "node:path";
 import type { AgentStep, CommandStep, Workflow, WorkflowEvent, WorkflowRunState } from "./shared/api.ts";
 import type { WorkflowRun } from "./shared/engine.ts";
 import type { Exec } from "./types.ts";
+import { simHints } from "./tools/sim_hints.ts";
 
 export interface WorkflowDeps {
 	/** Absolute project folder used by commands. */
 	workspace: string;
 	exec: Exec;
 	/** Runs an agent with fresh context and reports one line per tool call. */
-	runAgent(step: AgentStep, task: string, signal: AbortSignal, onLine: (line: string) => void): Promise<{ ok: boolean; text: string }>;
+	runAgent(step: AgentStep, task: string, signal: AbortSignal, onLine: (line: string) => void): Promise<{ ok: boolean; text: string; limit?: "time" | "turns" }>;
 }
 
 export function fillPlaceholders(text: string, vars: Record<string, string>): string {
@@ -27,8 +28,12 @@ export function validateWorkflow(workflow: Workflow): string[] {
 		if (step.type === "agent") {
 			if (!step.agent.trim()) problems.push(`Step "${step.id}" needs an agent.`);
 			if (!step.task.trim()) problems.push(`Step "${step.id}" needs a task.`);
-			if (step.temperature !== undefined && (!Number.isFinite(step.temperature) || step.temperature < 0 || step.temperature > 2)) problems.push(`Step "${step.id}" needs a temperature between 0 and 2.`);
-			if (step.maxTurns !== undefined && (!Number.isInteger(step.maxTurns) || step.maxTurns < 1)) problems.push(`Step "${step.id}" needs at least one turn.`);
+			for (const settings of [step, step.retry]) {
+				if (!settings) continue;
+				if (settings.temperature !== undefined && (!Number.isFinite(settings.temperature) || settings.temperature < 0 || settings.temperature > 2)) problems.push(`Step "${step.id}" needs a temperature between 0 and 2.`);
+				if (settings.maxTurns !== undefined && (!Number.isInteger(settings.maxTurns) || settings.maxTurns < 1)) problems.push(`Step "${step.id}" needs at least one turn.`);
+				if (settings.maxSeconds !== undefined && (!Number.isFinite(settings.maxSeconds) || settings.maxSeconds <= 0)) problems.push(`Step "${step.id}" needs a positive time limit.`);
+			}
 			if (step.tools !== undefined && step.tools.length === 0) problems.push(`Step "${step.id}" needs at least one tool.`);
 		} else if (!step.command.length || !step.command[0]?.trim()) {
 			problems.push(`Step "${step.id}" needs a command.`);
@@ -53,6 +58,7 @@ async function runCommand(step: CommandStep, vars: Record<string, string>, deps:
 	const selected = ok ? lines.slice(-5) : failures.length ? failures.slice(0, 10) : lines.slice(-10);
 	let text = selected.map((line) => line.slice(0, 200)).join("\n");
 	if (!ok && lines.length > selected.length) text += `\n(${lines.length - selected.length} more lines not shown)`;
+	if (!ok) text = [text, ...simHints(failures)].join("\n");
 	if (ok && !text) text = "Finished with no output.";
 	return { ok, text };
 }
@@ -66,6 +72,7 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 	const passed = new Map<string, number>();
 	const lastAgent = new Map<number, string>();
 	const attempts: string[] = [];
+	const agentRuns = new Map<string, number>();
 	let failure: { name: string; text: string; round: number } | undefined;
 	let controller = new AbortController();
 	let buildCreated = false;
@@ -107,10 +114,20 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 				if (step.type === "agent") {
 					let taskText = fillPlaceholders(step.task, vars);
 					if (failure) taskText += `\n\nThe check "${failure.name}" failed in round ${failure.round}:\n${failure.text}\n\nEarlier attempts:\n${attempts.join("\n")}\nFix the problem.`;
-					outcome = await deps.runAgent(step, taskText, owner.signal, (text) => {
+					const count = agentRuns.get(step.id) ?? 0;
+					agentRuns.set(step.id, count + 1);
+					const settings = count > 0 && step.retry ? { ...step, ...step.retry, extra: { ...step.extra, ...step.retry.extra } } : step;
+					const result = await deps.runAgent(settings, taskText, owner.signal, (text) => {
 						if (active(owner)) emit({ type: "line", stepId: step.id, text });
 					});
 					if (!active(owner)) return;
+					const checksDecide = result.limit !== undefined && workflow.steps.slice(index + 1).some((next) => next.type === "command");
+					if (checksDecide) {
+						const text = "Stopped at the time limit; the checks decide.";
+						state.log.push(text);
+						emit({ type: "line", stepId: step.id, text });
+					}
+					outcome = { ok: result.ok || checksDecide, text: result.text };
 					lastAgent.set(state.round, (outcome.text.split(/\r?\n/)[0] ?? "").slice(0, 160));
 					outcome = { ok: outcome.ok, text: outcome.text.slice(0, 600) };
 				} else {
@@ -181,6 +198,7 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 			controller.abort();
 			controller = new AbortController();
 			passed.clear();
+			agentRuns.clear();
 			lastAgent.clear();
 			attempts.length = 0;
 			failure = undefined;

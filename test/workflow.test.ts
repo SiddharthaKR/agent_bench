@@ -1,4 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runWorkflow, createEngine } from "../src/index.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkflowRun, fillPlaceholders, validateWorkflow } from "../src/workflow.ts";
 import type { WorkflowDeps } from "../src/workflow.ts";
@@ -25,6 +28,78 @@ function settle(run: WorkflowRun, action: () => void): Promise<void> {
 }
 
 describe("workflow", () => {
+	it.each([false, true])("applies time limit precedence through real adapters (engine: %s)", async (engine) => {
+		const root = await mkdtemp(join(tmpdir(), "workflow-limits-"));
+		try {
+			await mkdir(join(root, "agents", "fpga"), { recursive: true });
+			await writeFile(join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Test", tools: ["read_file"], maxSeconds: 0.01 }));
+			await writeFile(join(root, "agents", "fpga", "prompt.md"), "Work.");
+			await writeFile(join(root, "config.json"), JSON.stringify({ servers: { local: { baseUrl: "http://fake/v1", model: "base", extra: { a: 1, b: 2 } } }, commands: { compile: [], simulate: [] } }));
+			const bodies: Record<string, unknown>[] = [];
+			const fetchFn: typeof fetch = async (_url, init) => {
+				bodies.push(JSON.parse(String(init?.body)));
+				await new Promise((resolve) => setTimeout(resolve, 40));
+				return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Done" }, finish_reason: "stop" }] }));
+			};
+			for (const [stepSeconds, runSeconds, expected] of [[undefined, undefined, "failed"], [undefined, 1, "done"], [0.01, 1, "failed"], [1, 0.01, "done"]] as const) {
+				const w = workflow([{ ...agent, task: "Work", maxSeconds: stepSeconds, extra: { b: 3 } }]);
+				let status: string;
+				if (engine) {
+					const e = createEngine({ root, defaultFolder: root, fetchFn, maxSeconds: runSeconds });
+					const run = await e.createWorkflowRun({ workflow: w, folder: root, task: "Work", server: "local" });
+					await settle(run, () => run.start());
+					status = run.state.status;
+				} else status = (await runWorkflow({ root, folder: root, workflow: w, task: "Work", fetchFn, maxSeconds: runSeconds })).status;
+				expect(status).toBe(expected);
+			}
+			expect(bodies.at(-1)).toMatchObject({ a: 1, b: 3 });
+		} finally { await rm(root, { recursive: true, force: true }); }
+	});
+	it.each(["time", "turns"] as const)("lets checks decide after the %s limit", async (limit) => {
+		const d = deps({ runAgent: async () => ({ ok: false, text: "Stopped", limit }) });
+		const run = createWorkflowRun("r", workflow(), "", d);
+		await settle(run, () => run.start());
+		expect(run.state.status).toBe("done");
+		expect(run.state.log).toContain("Stopped at the time limit; the checks decide.");
+		const alone = createWorkflowRun("r", workflow([agent]), "", d);
+		await settle(alone, () => alone.start());
+		expect(alone.state.status).toBe("failed");
+	});
+
+	it("uses retry settings only after that agent has already run", async () => {
+		const settings: WorkflowStep[] = [];
+		const step = { ...agent, model: "first", temperature: 0.8, maxTurns: 4, maxSeconds: 5, extra: { a: 1, b: 2 }, retry: { model: "second", temperature: 0, maxTurns: 8, maxSeconds: 9, extra: { b: 3 } } };
+		const run = createWorkflowRun("r", workflow([step, { ...command, onFail: { goTo: "write", maxRounds: 2 } }]), "", deps({
+			runAgent: async (s) => { settings.push(s); return { ok: true, text: "Done" }; },
+			exec: vi.fn().mockResolvedValueOnce(result({ stdout: "FAIL" })).mockResolvedValueOnce(result()),
+		}));
+		await settle(run, () => run.start());
+		expect(settings[0]).toEqual(step);
+		expect(settings[1]).toMatchObject({ model: "second", temperature: 0, maxTurns: 8, maxSeconds: 9, extra: { a: 1, b: 3 } });
+		expect(step.extra).toEqual({ a: 1, b: 2 });
+	});
+
+	it("validates step and retry limits", () => {
+		for (const value of [0, -1, NaN, Infinity]) {
+			for (const settings of [{ maxSeconds: value }, { retry: { maxSeconds: value } }, { retry: { maxTurns: value } }]) {
+				expect(validateWorkflow(workflow([{ ...agent, ...settings }]))).not.toEqual([]);
+			}
+		}
+		for (const temperature of [-1, 3, NaN]) expect(validateWorkflow(workflow([{ ...agent, retry: { temperature } }]))).not.toEqual([]);
+		expect(validateWorkflow(workflow([{ ...agent, maxSeconds: 0.5, retry: { temperature: 0, maxTurns: 1, maxSeconds: 0.1 } }]))).toEqual([]);
+	});
+
+	it("includes hints beyond the displayed ten failure lines in retry context", async () => {
+		const tasks: string[] = [];
+		const lines = [...Array.from({ length: 10 }, () => "FAIL other"), "FAIL a got x wanted 1", "FAIL b got 1 wanted 2", "FAIL c got 2 wanted 3"];
+		const run = createWorkflowRun("r", workflow([agent, { ...command, onFail: { goTo: "write", maxRounds: 2 } }]), "", deps({
+			runAgent: async (_s, task) => { tasks.push(task); return { ok: true, text: "Done" }; },
+			exec: async () => result({ stdout: lines.join("\n") }),
+		}));
+		await settle(run, () => run.start());
+		expect(tasks[1]).toContain("output is late");
+		expect(tasks[1]).toContain("Hint: x means");
+	});
 	it("fills every known placeholder literally and preserves unknown ones", () => {
 		expect(fillPlaceholders("{a} {a} {missing} {toString}", { a: "$&" })).toBe("$& $& {missing} {toString}");
 	});

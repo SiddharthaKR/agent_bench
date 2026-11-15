@@ -37,6 +37,10 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 }
 
 export async function workflowMain(argv: string[]): Promise<number> {
+	if (argv.includes("--help")) {
+		console.log("Usage: workflow --workflow file.json --folder path --task text [--server name] [--model name] [--var name=value] [--no-pause] [--max-seconds seconds]\n--max-seconds limits each agent step, not the whole workflow.");
+		return 0;
+	}
 	const args = parseWorkflowArgs(argv);
 	const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	const { run, workflow } = await prepareWorkflowRun({ ...args, root });

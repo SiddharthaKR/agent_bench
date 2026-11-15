@@ -65,14 +65,14 @@ export async function prepareWorkflowRun(options: RunWorkflowOptions) {
 			if (!/^[A-Za-z0-9_-]+$/.test(step.agent)) throw new Error("Invalid agent name.");
 			const result = await runAgent({
 				agentDir: path.join(root, "agents", step.agent), workspace, task,
-				server: { ...server, model: step.model ?? options.model ?? server.model, temperature: step.temperature ?? server.temperature },
+				server: { ...server, model: step.model ?? options.model ?? server.model, temperature: step.temperature ?? server.temperature, extra: { ...server.extra, ...step.extra } },
 				commands: config.commands, runsDir: path.join(root, "runs"), exec,
-				signal, onStep: onLine, maxSeconds: options.maxSeconds, fetchFn: options.fetchFn,
+				signal, onStep: onLine, maxSeconds: step.maxSeconds ?? options.maxSeconds, fetchFn: options.fetchFn,
 				overrides: { maxTurns: step.maxTurns, tools: step.tools },
 			});
 			if (result.finalText) onLine(result.finalText);
 			if (result.reason === "time") onLine("Ended: time");
-			return { ok: result.reason === "done", text: result.finalText || result.error || `The agent ended with: ${result.reason}.` };
+			return { ok: result.reason === "done", text: result.finalText || result.error || `The agent ended with: ${result.reason}.`, limit: result.reason === "time" ? "time" : result.reason === "limit" ? "turns" : undefined };
 		},
 	});
 	return { workflow, run };

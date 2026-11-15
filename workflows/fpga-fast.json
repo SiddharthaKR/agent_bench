@@ -1,0 +1,58 @@
+{
+	"id": "fpga-fast",
+	"name": "Fast first try, think on a retry",
+	"task": "Describe the block to build, or name the spec file.",
+	"vars": {
+		"design": "rtl/design.v",
+		"tb": "tb/tb_design.v"
+	},
+	"steps": [
+		{
+			"id": "write",
+			"type": "agent",
+			"agent": "fpga",
+			"name": "Write or fix the design",
+			"task": "{task}",
+			"maxSeconds": 90,
+			"extra": {
+				"reasoning_effort": "none"
+			},
+			"retry": {
+				"maxSeconds": 150,
+				"extra": {
+					"reasoning_effort": "medium"
+				}
+			}
+		},
+		{
+			"id": "build",
+			"type": "command",
+			"name": "Build the simulation",
+			"command": [
+				"iverilog",
+				"-g2012",
+				"-o",
+				".build/sim.out",
+				"{design}",
+				"{tb}"
+			],
+			"onFail": {
+				"goTo": "write",
+				"maxRounds": 3
+			}
+		},
+		{
+			"id": "simulate",
+			"type": "command",
+			"name": "Simulate",
+			"command": [
+				"vvp",
+				".build/sim.out"
+			],
+			"onFail": {
+				"goTo": "write",
+				"maxRounds": 3
+			}
+		}
+	]
+}

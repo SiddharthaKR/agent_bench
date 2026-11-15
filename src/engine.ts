@@ -23,6 +23,8 @@ export interface EngineOptions {
 	defaultFolder: string;
 	exec?: Exec;
 	fetchFn?: typeof fetch;
+	/** Default time limit per workflow agent step, in seconds. */
+	maxSeconds?: number;
 }
 
 export function createEngine(options: EngineOptions): Engine {
@@ -125,7 +127,8 @@ export function createEngine(options: EngineOptions): Engine {
 						agentDir: await agentDirOf(step.agent),
 						workspace,
 						task,
-						server: { ...server, model: step.model ?? server.model, temperature: step.temperature ?? server.temperature },
+						server: { ...server, model: step.model ?? server.model, temperature: step.temperature ?? server.temperature, extra: { ...server.extra, ...step.extra } },
+						maxSeconds: step.maxSeconds ?? options.maxSeconds,
 						overrides: { maxTurns: step.maxTurns, tools: step.tools },
 						commands,
 						runsDir,
@@ -134,7 +137,7 @@ export function createEngine(options: EngineOptions): Engine {
 						onStep: onLine,
 						signal,
 					});
-					return { ok: result.reason === "done", text: result.finalText || result.error || `The agent ended with: ${result.reason}.` };
+					return { ok: result.reason === "done", text: result.finalText || result.error || `The agent ended with: ${result.reason}.`, limit: result.reason === "time" ? "time" : result.reason === "limit" ? "turns" : undefined };
 				},
 			});
 		},

@@ -128,6 +128,12 @@ export interface AgentStep extends StepBase {
 	temperature?: number;
 	/** Most tool calls this step may make. */
 	maxTurns?: number;
+	/** Time limit for this step, in seconds. */
+	maxSeconds?: number;
+	/** Extra request fields for this step, merged over the server's own `extra`. */
+	extra?: Record<string, unknown>;
+	/** Settings used instead when this step runs again after a failed check. */
+	retry?: { model?: string; temperature?: number; maxTurns?: number; maxSeconds?: number; extra?: Record<string, unknown> };
 	/** Tool names this step may use; a subset of the agent's tools. */
 	tools?: string[];
 }

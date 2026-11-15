@@ -59,11 +59,16 @@ const get = (rel: string) => fs.readFile(path.join(ws, rel), "utf8");
 const numbers = (n: number) => Array.from({ length: n }, (_, i) => `line${i + 1}`).join("\n") + "\n";
 
 describe("compile hints", () => {
+	it.each(["localparam X = 1;", "parameter X = 1;", "integer x;", "genvar x;"])("explains a block declaration: %s", async (declaration) => {
+		await put("a.v", `module a;\nalways @* begin\n  ${declaration}\nend\nendmodule`);
+		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:3: syntax error" })]);
+		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("Hint: declare localparam, parameter, wire, reg and integer at module level, before the always block.");
+	});
 	it("adds declaration advice only inside always, including nested blocks", async () => {
 		await put("a.v", "module a;\nalways @* begin\nif (1'b1) begin\nreg x;\nend\nend\nwire y;\nendmodule\n");
 		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:4: syntax error\na.v:7: syntax error" })]);
 		const result = await compile.run({ files: "a.v" }, ctx);
-		expect(result.text).toContain("4| reg x;\nHint: declare wires and regs at module level, not inside always.");
+		expect(result.text).toContain("4| reg x;\nHint: declare localparam, parameter, wire, reg and integer at module level, before the always block.");
 		expect(result.text.match(/Hint:/g)).toHaveLength(1);
 	});
 	it.each([
@@ -246,6 +251,24 @@ describe("replace_lines", () => {
 });
 
 describe("compile", () => {
+	it("silently skips lint when a compiled input can no longer be read", async () => {
+		const { ctx } = fakeCtx([]);
+		ctx.exec = async () => {
+			await fs.unlink(path.join(ws, "a.v"));
+			return res();
+		};
+		expect(await compile.run({ files: "a.v" }, ctx)).toEqual({ ok: true, text: "Compiled, 0 errors." });
+	});
+	it("keeps compile success and appends lint hints from each input", async () => {
+		await put("a.v", "module a(output reg dout); reg dout_reg; always @* dout_reg = 1; endmodule");
+		await put("b.v", "module b(output y); endmodule");
+		const { ctx } = fakeCtx([res()]);
+		const result = await compile.run({ files: "a.v b.v" }, ctx);
+		expect(result.ok).toBe(true);
+		expect(result.text).toContain("Compiled, 0 errors.\nHint: output dout is never assigned");
+		expect(result.text).toContain("You assign dout_reg instead;");
+		expect(result.text).toContain("Hint: output y is never assigned");
+	});
 	beforeEach(async () => {
 		await put("a.v", "module a; endmodule\n");
 		await fs.mkdir(path.join(ws, "tb"));
@@ -325,6 +348,27 @@ describe("compile", () => {
 });
 
 describe("run_sim", () => {
+	it("prioritizes lint hints and limits combined hints to three", async () => {
+		await put("a.v", "module a(output reg dout, other); reg dout_reg; always @* dout_reg = 1; endmodule");
+		const { ctx } = fakeCtx([res(), res({ stdout: "FAIL a got x wanted 1\nFAIL b got 1 wanted 2\nFAIL c got 2 wanted 3" })]);
+		const result = await runSim.run({ files: "a.v" }, ctx);
+		expect(result.ok).toBe(false);
+		const hints = result.text.split("\n").filter((line) => line.startsWith("Hint: "));
+		expect(hints).toHaveLength(3);
+		expect(hints[0]).toContain("output dout is never assigned");
+		expect(hints[1]).toContain("output other is never assigned");
+		expect(hints[2]).toContain("each result");
+		expect(result.text.indexOf("FAIL c")).toBeLessThan(result.text.indexOf("Hint: "));
+	});
+	it("appends both hints using failures beyond the displayed ten", async () => {
+		await put("a.v", "module a; endmodule");
+		const failures = [...Array.from({ length: 10 }, () => "FAIL other"), "FAIL a got x wanted 1", "FAIL b got 1 wanted 2", "FAIL c got 2 wanted 3"];
+		const { ctx } = fakeCtx([res(), res({ stdout: failures.join("\n") })]);
+		const r = await runSim.run({ files: "a.v" }, ctx);
+		expect(r.ok).toBe(false);
+		expect(r.text).toContain("(3 more lines not shown)\nHint: each result");
+		expect(r.text.split("\n").at(-1)).toContain("Hint: x means");
+	});
 	beforeEach(async () => {
 		await put("a.v", "module a; endmodule\n");
 		await put("t.v", "module t; endmodule\n");
