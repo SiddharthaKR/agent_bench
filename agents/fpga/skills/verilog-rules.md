@@ -8,7 +8,7 @@ Use non-blocking <= in clocked blocks and blocking = in combinational blocks.
 Give combinational outputs defaults and assign every path to avoid latches.
 Use always @* for combinational logic. Give each reg exactly one driver.
 
-Size and sign every constant, for example 16'sd5 or 1'b0. Use localparam for named constants.
+Size and sign every constant, for example 16'sd5 or 1'b0. A negative constant has the minus sign first: -16'sd32768, never 16'sd-32768. Use localparam for named constants; a limit that is compared with a signed value must be declared localparam signed.
 Declare signed operands and results signed on both sides of arithmetic. Part-selects and concatenations are unsigned; cast them when needed.
 Widen operands before multiplication or addition. Compare the wide result against signed limits, then assign the appropriate limit on overflow. Never implement saturation by slicing away overflow bits.
 
