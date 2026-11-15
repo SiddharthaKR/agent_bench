@@ -90,6 +90,14 @@ export interface RunResult {
 
 const INVALID_HELP = "Write the call again in exactly this form:\n@tool name\nkey: value\n---\ntext (only if the tool takes it)\n@end";
 
+export const SAVE_REMINDER = "You put code in your reply, but nothing is saved. Save it with write_file, then test it.";
+
+export function hasUnsavedCode(message: AssistantMessage): boolean {
+	if (message.stopReason === "error" || message.stopReason === "aborted" || message.content.some((block) => block.type === "toolCall")) return false;
+	const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+	return /```[\s\S]*?```|~~~[\s\S]*?~~~/.test(text) || /^module [\s\S]*?\bendmodule\b/m.test(text);
+}
+
 export function toAgentTool(spec: ToolSpec, ctx: ToolContext): AgentTool {
 	const props: Record<string, any> = {};
 	for (const arg of spec.args) {
@@ -174,7 +182,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
 		const trace = createTrace(options.runsDir, path.basename(options.agentDir));
 		for (const text of mcp?.problems ?? []) trace.write({ type: "note", text });
-		const ctx: ProtectedContext = { protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
+		const ctx: ProtectedContext & { smallFileLines?: number } = { smallFileLines: agentFile.smallFileLines, protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
 		const guard = new LoopGuard({ maxCalls: options.overrides?.maxTurns ?? agentFile.maxTurns ?? 40 });
 		const seconds = options.maxSeconds ?? agentFile.maxSeconds;
 		const remainingSeconds = () => seconds === undefined ? undefined : Math.max(0, seconds - (Date.now() - started) / 1000);
@@ -188,6 +196,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		let firstPromptTokens = 0;
 		let lastPromptTokens = 0;
 		let outputTokens = 0;
+		let saved = false;
+		let reminded = false;
 		const say = options.onStep ?? (() => {});
 
 		trace.write({
@@ -237,6 +247,12 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 				if (!firstPromptTokens) firstPromptTokens = message.usage.input;
 				lastPromptTokens = message.usage.input || lastPromptTokens;
 				outputTokens += message.usage.output;
+				if (!saved && !reminded && !stoppedBy && hasUnsavedCode(message)) {
+					reminded = true;
+					trace.write({ type: "guard", reason: SAVE_REMINDER, stop: false });
+					say(`     guard: ${SAVE_REMINDER}`);
+					agent.followUp({ role: "user", content: SAVE_REMINDER, timestamp: Date.now() });
+				}
 			} else if (event.type === "tool_execution_start") {
 				const { content, raw, ...rest } = (event.args ?? {}) as Record<string, unknown>;
 				trace.write({
@@ -248,6 +264,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 			} else if (event.type === "tool_execution_end") {
 				const text: string = event.result?.content?.[0]?.text ?? "";
 				toolCalls++;
+				if (!event.isError && ["write_file", "replace_lines"].includes(event.toolName)) saved = true;
 				if (event.toolName === INVALID_CALL) invalidCalls++;
 				else if (event.isError) toolErrors++;
 				trace.write({ type: "tool_result", tool: event.toolName, ok: !event.isError, ms: event.durationMs ?? 0, text });

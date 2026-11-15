@@ -2,6 +2,11 @@ import { expect, it } from "vitest";
 import { setAgentSetting, setStepTools } from "./logic.ts";
 import type { AgentStep } from "../../../src/shared/api.ts";
 const step: AgentStep = { id: "one", name: "One", type: "agent", agent: "fpga", task: "Work" };
+it("keeps retry task when editing settings and serializing the workflow step", () => {
+	const retry = { task: "Repair {design}" };
+	const edited = setStepTools(setAgentSetting({ ...step, retry }, "model", "local"), ["read_file"]);
+	expect(JSON.parse(JSON.stringify(edited)).retry).toEqual(retry);
+});
 it("sets overrides and removes empty values instead of storing defaults", () => {
 	const model = setAgentSetting(step, "model", "local-model");
 	expect(model.model).toBe("local-model");

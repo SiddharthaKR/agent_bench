@@ -58,11 +58,39 @@ const put = (rel: string, text: string) => fs.writeFile(path.join(ws, rel), text
 const get = (rel: string) => fs.readFile(path.join(ws, rel), "utf8");
 const numbers = (n: number) => Array.from({ length: n }, (_, i) => `line${i + 1}`).join("\n") + "\n";
 
+it.each(["v", "sv", "vh", "svh"])("repairs decimal constants on write and replace in .%s", async (ext) => {
+	const file = `a.${ext}`;
+	const result = await writeFile.run({ path: file, content: "14'sd-8192 8'D - 12 8'Sd-3 8'h-ff\n// 14'sd-8192\n/* 14'sd-8192 */ \"14'sd-8192\"" }, plainCtx());
+	expect(await get(file)).toBe("-8192 -12 -3 8'h-ff\n// 14'sd-8192\n/* 14'sd-8192 */ \"14'sd-8192\"\n");
+	expect(result.text).toContain("Fixed 3 constant(s): 14'sd-8192 -> -8192 (a sized constant cannot contain a minus sign).");
+	const edit = await replaceLines.run({ path: file, from: 1, to: 1, content: "14'sd-8192" }, plainCtx());
+	expect(await get(file)).toMatch(/^-8192\n/);
+	expect(edit.text).toContain("Fixed 1 constant(s)");
+});
+
+it("keeps comment state across replaced lines and skips other extensions", async () => {
+	await put("a.v", "/*\nold\n*/\nold\n");
+	await replaceLines.run({ path: "a.v", from: 2, to: 2, content: "14'sd-8192" }, plainCtx());
+	expect(await get("a.v")).toBe("/*\n14'sd-8192\n*/\nold\n");
+	await writeFile.run({ path: "a.txt", content: "14'sd-8192" }, plainCtx());
+	expect(await get("a.txt")).toBe("14'sd-8192\n");
+});
+
+it.each([149, 150, 151])("adds a long-file compile hint only above the limit: %s", async (count) => {
+	await put("a.v", numbers(count));
+	for (const tool of [compile, runSim]) {
+		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:1: syntax error\na.v:2: syntax error" })]);
+		const text = (await tool.run({ files: "a.v" }, ctx)).text;
+		expect(text.includes(`Hint: a.v has ${count} lines. Fix only the reported lines with replace_lines; do not rewrite the file.`)).toBe(count > 150);
+		expect(text.match(/Fix only the reported lines/g)?.length ?? 0).toBe(count > 150 ? 1 : 0);
+	}
+});
+
 describe("compile hints", () => {
 	it.each(["16'sd-32768", "16'd-2", "16'sh-8000", "16'h-2"])("explains negative sized literal %s", async (literal) => {
 		await put("a.v", `module a;\nlocalparam X = ${literal};\nendmodule`);
 		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:2: syntax error" })]);
-		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("Hint: put the minus sign before the size: -16'sd32768, not 16'sd-32768.");
+		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("Hint: a sized constant cannot contain a minus sign. Write the value as a plain signed decimal, for example -8192.");
 	});
 	it.each(["localparam X = 1;", "parameter X = 1;", "integer x;", "genvar x;"])("explains a block declaration: %s", async (declaration) => {
 		await put("a.v", `module a;\nalways @* begin\n  ${declaration}\nend\nendmodule`);

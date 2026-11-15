@@ -48,6 +48,7 @@ export function validateWorkflow(workflow: Workflow): string[] {
 		if (step.type === "agent") {
 			if (!step.agent.trim()) problems.push(`Step "${step.id}" needs an agent.`);
 			if (!step.task.trim()) problems.push(`Step "${step.id}" needs a task.`);
+			if (step.retry?.task !== undefined && !step.retry.task.trim()) problems.push(`Step "${step.id}" needs a retry task.`);
 			for (const settings of [step, step.retry]) {
 				if (!settings) continue;
 				if (settings.temperature !== undefined && (!Number.isFinite(settings.temperature) || settings.temperature < 0 || settings.temperature > 2)) problems.push(`Step "${step.id}" needs a temperature between 0 and 2.`);
@@ -132,11 +133,11 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 			let outcome: { ok: boolean; text: string };
 			try {
 				if (step.type === "agent") {
-					let taskText = fillPlaceholders(step.task, vars);
-					if (failure) taskText += `\n\nThe check "${failure.name}" failed in round ${failure.round}:\n${failure.text}\n\nEarlier attempts:\n${attempts.join("\n")}\nFix the problem.`;
 					const count = agentRuns.get(step.id) ?? 0;
 					agentRuns.set(step.id, count + 1);
 					const settings = count > 0 && step.retry ? { ...step, ...step.retry, extra: { ...step.extra, ...step.retry.extra } } : step;
+					let taskText = fillPlaceholders(settings.task, vars);
+					if (failure) taskText += `\n\nThe check "${failure.name}" failed in round ${failure.round}:\n${failure.text}\n\nEarlier attempts:\n${attempts.join("\n")}\nFix the problem.`;
 					const result = await deps.runAgent(settings, taskText, owner.signal, (text) => {
 						if (active(owner)) emit({ type: "line", stepId: step.id, text });
 					});

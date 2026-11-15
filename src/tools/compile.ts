@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ToolContext, ToolOutput, ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
-import { trimLine } from "./util.ts";
+import { splitLines, trimLine } from "./util.ts";
 import { lintVerilog } from "./lint.ts";
 
 export const OUT_PATH = ".build/sim.out";
@@ -36,7 +36,7 @@ export function outputLines(...parts: string[]): string[] {
 export type CompileOutcome = ToolOutput & { files: string[] };
 
 /** Shared by compile and run_sim. */
-export async function compileFiles(filesArg: unknown, ctx: ToolContext): Promise<CompileOutcome> {
+export async function compileFiles(filesArg: unknown, ctx: ToolContext & { smallFileLines?: number }): Promise<CompileOutcome> {
 	const fail = (text: string): CompileOutcome => ({ ok: false, text, files: [] });
 	const names = String(filesArg ?? "").split(/\s+/).filter((s) => s !== "");
 	if (names.length === 0) return fail("Give at least one file to compile.");
@@ -74,7 +74,7 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext): Promise
 		return { ok: true, text, files: rels };
 	}
 	if (lines.length === 0) return fail("Compile failed with no messages.");
-	const shown = await withSource(lines.slice(0, SHOWN), rels, ctx.workspace);
+	const shown = await withSource(lines.slice(0, SHOWN), rels, ctx.workspace, ctx.smallFileLines ?? 150, lines);
 	let text = `Compile failed, ${lines.length} message lines.\n${shown.join("\n")}`;
 	if (lines.length > SHOWN) text += `\n(${lines.length - SHOWN} more lines not shown)`;
 	return fail(text);
@@ -100,7 +100,7 @@ export async function lintFiles(files: string[], workspace: string): Promise<str
  * Puts the offending source line under a message like `rtl/gain.v:45: syntax error`,
  * so the model can fix the right line without reading the file again.
  */
-async function withSource(messages: string[], rels: string[], workspace: string): Promise<string[]> {
+async function withSource(messages: string[], rels: string[], workspace: string, limit: number, allMessages: string[]): Promise<string[]> {
 	const out: string[] = [];
 	const seen = new Set<string>();
 	const cache = new Map<string, string[]>();
@@ -132,11 +132,26 @@ async function withSource(messages: string[], rels: string[], workspace: string)
 			hints++;
 		}
 	}
+	if (hints < 2 && limit > 0) {
+		for (const message of allMessages) {
+			const match = /^(.+?):\d+:/.exec(message);
+			if (!match) continue;
+			const name = match[1]!.replace(/\\/g, "/");
+			const resolved = resolveInWorkspace(workspace, path.isAbsolute(name) ? path.relative(workspace, name) : name);
+			if (!resolved.ok) continue;
+			try {
+				const count = splitLines(await fs.readFile(resolved.abs, "utf8")).length;
+				if (count <= limit) continue;
+				out.push(`Hint: ${resolved.rel} has ${count} lines. Fix only the reported lines with replace_lines; do not rewrite the file.`);
+				break;
+			} catch { /* The compiler may name a file that is no longer available. */ }
+		}
+	}
 	return out;
 }
 
 function compileHint(message: string, line: string, prefix: string): string | undefined {
-	if (/syntax error/i.test(message) && /\d+\s*'s?[dh]\s*-/i.test(line)) return "put the minus sign before the size: -16'sd32768, not 16'sd-32768.";
+	if (/syntax error/i.test(message) && /\d+\s*'s?[dh]\s*-/i.test(line)) return "a sized constant cannot contain a minus sign. Write the value as a plain signed decimal, for example -8192.";
 	const rules: [RegExp, string][] = [
 		[/is not a valid l-value/i, "only a reg can be assigned in an always block; a wire needs assign."],
 		[/Unable to bind wire\/reg\/memory/i, "this name is not declared in this module."],

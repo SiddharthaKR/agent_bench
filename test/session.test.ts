@@ -84,6 +84,53 @@ function open(model: ReturnType<typeof fakeModel>, askFirst: boolean, exec: Exec
 const WRITE = "I will create the file.\n@tool write_file\npath: a.v\n---\nmodule a;\nendmodule\n@end";
 
 describe("session", () => {
+	it("does not remind an agent without write tools", async () => {
+		await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Read only", tools: ["read_file"] }));
+		const model = fakeModel(["module a; endmodule"]);
+		const session = await open(model, false);
+		const done = idleAfterWork(session);
+		session.send("Explain");
+		await done;
+		expect(model.requests).toHaveLength(1);
+	});
+
+	it("shows the repaired range edit in its proposal", async () => {
+		await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "Writer", tools: ["replace_lines"], smallFileLines: 0 }));
+		await writeFile(path.join(workspace, "a.v"), "/*\ncomment\n*/\nold\n");
+		const model = fakeModel(["@tool replace_lines\npath: a.v\nfrom: 4\nto: 4\n---\nlocalparam X = 14'sd-8192;\n@end", "module a; endmodule"]);
+		const session = await open(model, true);
+		const done = idleAfterWork(session);
+		session.send("Work");
+		const proposal = await until(session, (event) => event.type === "proposal") as Extract<SessionEvent, { type: "proposal" }>;
+		expect(proposal.diff).toContainEqual(expect.objectContaining({ kind: "add", text: "localparam X = -8192;" }));
+		session.resolve(proposal.id, true);
+		await done;
+		expect(model.requests).toHaveLength(2);
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toContain("localparam X = -8192;");
+	});
+	it("reminds once when code is unsaved", async () => {
+		const code = "```verilog\nmodule a; endmodule\n```";
+		const model = fakeModel([code, code]);
+		const session = await open(model, false);
+		const done = idleAfterWork(session);
+		session.send("Work");
+		await done;
+		expect(model.requests).toHaveLength(2);
+		expect(model.requests[1]!.messages.at(-1)!.content).toBe("You put code in your reply, but nothing is saved. Save it with write_file, then test it.");
+	});
+
+	it("proposes repaired Verilog before approval", async () => {
+		const model = fakeModel(["@tool write_file\npath: a.v\n---\nlocalparam X = 14'sd-8192;\n@end", "Done."]);
+		const session = await open(model, true);
+		const done = idleAfterWork(session);
+		session.send("Work");
+		const proposal = await until(session, (event) => event.type === "proposal") as Extract<SessionEvent, { type: "proposal" }>;
+		expect(proposal.diff).toContainEqual(expect.objectContaining({ kind: "add", text: "localparam X = -8192;" }));
+		session.resolve(proposal.id, true);
+		await done;
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toBe("localparam X = -8192;\n");
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("Fixed 1 constant(s)");
+	});
 	it.each([true, false])("never proposes a protected edit (ask first: %s)", async (askFirst) => {
 		await writeFile(path.join(workspace, "a.v"), "given\n");
 		const model = fakeModel([WRITE, "Done."]);

@@ -3,6 +3,7 @@ import type { ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { isNotFound, joinLines, lineNumber, numbered, splitLines } from "./util.ts";
 import { protectedRefusal } from "./edit_policy.ts";
+import { autofixVerilog } from "./autofix.ts";
 
 const CONTEXT = 2;
 const ECHO_CAP = 40;
@@ -52,7 +53,9 @@ export const replaceLines: ToolSpec = {
 
 		const body = typeof args.content === "string" ? args.content : "";
 		const added = body === "" ? [] : splitLines(body.endsWith("\n") || body.endsWith("\r") ? body : body + "\n");
-		const next = [...lines.slice(0, from - 1), ...added, ...lines.slice(to)];
+		const combined = joinLines([...lines.slice(0, from - 1), ...added, ...lines.slice(to)]);
+		const repaired = /\.(v|sv|vh|svh)$/i.test(p.rel) ? autofixVerilog(combined) : { text: combined, notes: [] };
+		const next = splitLines(repaired.text);
 		try {
 			await fs.writeFile(p.abs, joinLines(next), "utf8");
 		} catch (err) {
@@ -65,6 +68,6 @@ export const replaceLines: ToolSpec = {
 		if (echo.length > ECHO_CAP) echo = [...echo.slice(0, 20), "...", ...echo.slice(-20)];
 
 		const head = `Replaced lines ${from}-${to} of ${p.rel} with ${added.length} lines. File now has ${next.length} lines.`;
-		return { ok: true, text: echo.length > 0 ? `${head}\n${echo.join("\n")}` : head };
+		return { ok: true, text: [head, ...echo, ...repaired.notes].join("\n") };
 	},
 };

@@ -4,6 +4,7 @@ import type { ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { joinLines, splitLines } from "./util.ts";
 import { protectedRefusal } from "./edit_policy.ts";
+import { autofixVerilog } from "./autofix.ts";
 
 export const writeFile: ToolSpec = {
 	name: "write_file",
@@ -20,7 +21,8 @@ export const writeFile: ToolSpec = {
 		}
 
 		// Collapse trailing blank lines so the file ends in exactly one newline.
-		const lines = splitLines(args.content.replace(/\r\n?/g, "\n").replace(/\n+$/, "\n"));
+		const repaired = /\.(v|sv|vh|svh)$/i.test(p.rel) ? autofixVerilog(args.content) : { text: args.content, notes: [] };
+		const lines = splitLines(repaired.text.replace(/\r\n?/g, "\n").replace(/\n+$/, "\n"));
 		let existed = true;
 		try {
 			const st = await fs.stat(p.abs);
@@ -34,6 +36,6 @@ export const writeFile: ToolSpec = {
 		} catch (err) {
 			return { ok: false, text: `Could not write ${p.rel}: ${(err as Error).message}` };
 		}
-		return { ok: true, text: `${existed ? "Wrote" : "Created"} ${p.rel}, ${lines.length} lines.` };
+		return { ok: true, text: [`${existed ? "Wrote" : "Created"} ${p.rel}, ${lines.length} lines.`, ...repaired.notes].join("\n") };
 	},
 };

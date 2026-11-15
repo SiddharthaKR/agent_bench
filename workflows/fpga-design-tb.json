@@ -1,0 +1,90 @@
+{
+	"id": "fpga-design-tb",
+	"name": "Design first, then its testbench, then fix",
+	"task": "Describe the block to build, or name the spec file.",
+	"vars": {
+		"design": "rtl/design.v",
+		"tb": "tb/tb_design.v"
+	},
+	"steps": [
+		{
+			"id": "design",
+			"type": "agent",
+			"agent": "fpga",
+			"name": "Write or fix the design",
+			"task": "{task}\n\nThis step: write only the design {design}. Check it with compile and fix every error. Do not write a testbench or a report in this step.",
+			"maxSeconds": 120,
+			"extra": {
+				"reasoning_effort": "none"
+			},
+			"retry": {
+				"task": "{task}\n\nA check failed; the report is below. Read {design} first, and {tb} if it exists. Decide from the spec which file is wrong and fix only that file. Then run run_sim with files: {design} {tb} if the testbench exists, otherwise compile, until it passes.",
+				"maxSeconds": 180,
+				"extra": {
+					"reasoning_effort": "medium"
+				}
+			}
+		},
+		{
+			"id": "compile",
+			"type": "command",
+			"name": "Compile the design",
+			"command": [
+				"iverilog",
+				"-g2012",
+				"-o",
+				".build/design.out",
+				"{design}"
+			],
+			"onFail": {
+				"goTo": "design",
+				"maxRounds": 3
+			}
+		},
+		{
+			"id": "testbench",
+			"type": "agent",
+			"agent": "testbench",
+			"name": "Write the testbench",
+			"once": true,
+			"task": "{task}\n\nThis step: write only the testbench {tb} for the module in {design}. Read the spec and the module's port list. Do not change {design}. Run run_sim with files: {design} {tb}. When a check fails, work out its expected value from the spec again; change the testbench only if the testbench is wrong. End with a summary that names the checks that still fail.",
+			"skills": [
+				"testbench-template"
+			],
+			"maxSeconds": 150,
+			"extra": {
+				"reasoning_effort": "none"
+			}
+		},
+		{
+			"id": "build",
+			"type": "command",
+			"name": "Build the simulation",
+			"command": [
+				"iverilog",
+				"-g2012",
+				"-o",
+				".build/sim.out",
+				"{design}",
+				"{tb}"
+			],
+			"onFail": {
+				"goTo": "design",
+				"maxRounds": 3
+			}
+		},
+		{
+			"id": "simulate",
+			"type": "command",
+			"name": "Simulate",
+			"command": [
+				"vvp",
+				".build/sim.out"
+			],
+			"onFail": {
+				"goTo": "design",
+				"maxRounds": 3
+			}
+		}
+	]
+}

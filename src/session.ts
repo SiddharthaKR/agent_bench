@@ -7,7 +7,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { invalidTool, loadAgent, toAgentTool } from "./agent.ts";
+import { hasUnsavedCode, invalidTool, loadAgent, SAVE_REMINDER, toAgentTool } from "./agent.ts";
+import { autofixVerilog } from "./tools/autofix.ts";
 import { lineDiff } from "./diff.ts";
 import { LoopGuard } from "./guard.ts";
 import { trimContext } from "./context.ts";
@@ -60,7 +61,8 @@ async function previewEdit(tool: string, args: Record<string, unknown>, workspac
 		isNew = true;
 	}
 	const text = typeof args.content === "string" ? args.content.replace(/\r\n/g, "\n") : "";
-	if (tool === "write_file") return { path: resolved.rel, before, after: text, isNew };
+	const repair = (value: string) => /\.(v|sv|vh|svh)$/i.test(resolved.rel) ? autofixVerilog(value).text : value;
+	if (tool === "write_file") return { path: resolved.rel, before, after: repair(text), isNew };
 	if (isNew) return null;
 	const lines = before.split("\n");
 	if (lines[lines.length - 1] === "") lines.pop();
@@ -69,7 +71,7 @@ async function previewEdit(tool: string, args: Record<string, unknown>, workspac
 	if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from || to > lines.length) return null;
 	const fresh = text === "" ? [] : text.replace(/\n$/, "").split("\n");
 	lines.splice(from - 1, to - from + 1, ...fresh);
-	return { path: resolved.rel, before, after: lines.join("\n"), isNew: false };
+	return { path: resolved.rel, before, after: repair(lines.join("\n")), isNew: false };
 }
 
 /** Events with the same key are versions of one thing. Null: every event stands alone. */
@@ -95,7 +97,7 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 			systemPrompt = systemPrompt.replace(renderToolHelp(specs), () => renderToolHelp([...specs, ...mcp.tools]));
 			specs.push(...mcp.tools);
 		}
-		const ctx: ProtectedContext = { protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
+		const ctx: ProtectedContext & { smallFileLines?: number } = { smallFileLines: agentFile.smallFileLines, protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
 		const trace = createTrace(options.runsDir, `${path.basename(options.agentDir)}-session`);
 		trace.write({ type: "run_start", agent: agentFile.name, model: options.server.model, workspace: ctx.workspace, promptChars: systemPrompt.length, systemPrompt });
 
@@ -107,6 +109,9 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 		let counter = 0;
 		let modelCalls = 0;
 		let outputTokens = 0;
+		let saved = false;
+		let reminded = false;
+		const canWrite = specs.some((spec) => EDIT_TOOLS.has(spec.name));
 		/** Reasoning and notes of the reply that made the current tool call. */
 		let thinking = "";
 		const waiting = new Map<string, (accept: boolean) => void>();
@@ -226,6 +231,13 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 				} else if (message.stopReason === "error") {
 					note(message.errorMessage ?? "The model server reported an error.", "bad");
 				} else if (message.stopReason !== "aborted") {
+					if (canWrite && !saved && !reminded && hasUnsavedCode(message)) {
+						reminded = true;
+						trace.write({ type: "guard", reason: SAVE_REMINDER, stop: false });
+						note(SAVE_REMINDER);
+						agent.followUp({ role: "user", content: SAVE_REMINDER, timestamp: Date.now() });
+						return;
+					}
 					const answer = text.join("\n").trim();
 					if (answer) emit({ type: "agent", id: nextId("a"), text: answer });
 				}
@@ -256,6 +268,7 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 				const result: string = event.result?.content?.[0]?.text ?? "";
 				const step = steps.get(event.toolCallId);
 				const status: StepStatus = refused.get(event.toolCallId) ?? (event.isError ? "error" : "ok");
+				if (status === "ok" && EDIT_TOOLS.has(event.toolName)) saved = true;
 				trace.write({ type: "tool_result", tool: event.toolName, ok: !event.isError, ms: event.durationMs ?? 0, text: result });
 				if (step) emit({ ...step, status, result, ...(event.durationMs !== undefined ? { ms: Math.round(event.durationMs) } : {}) });
 				const proposal = proposals.get(event.toolCallId);
@@ -265,6 +278,8 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 
 		const run = async (text: string) => {
 			busy = true;
+			saved = false;
+			reminded = false;
 			deadline = agentFile.maxSeconds === undefined ? undefined : Date.now() + agentFile.maxSeconds * 1000;
 			guard = new LoopGuard({ maxCalls: agentFile.maxTurns ?? 40 });
 			emit({ type: "status", state: "working" });

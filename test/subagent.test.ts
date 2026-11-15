@@ -39,6 +39,15 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe("sub-agents", () => {
+	it("reminds a child about unsaved code once and records its guard", async () => {
+		const fake = model(["@tool ask_agent\nagent: helper\n---\nBuild\n@end", "module a; endmodule", "module a; endmodule", "Done."]);
+		const result = await runAgent({ ...options, fetchFn: fake.fetchFn });
+		expect(fake.requests).toHaveLength(4);
+		expect(fake.requests[2]!.messages.at(-1)!.content).toBe("You put code in your reply, but nothing is saved. Save it with write_file, then test it.");
+		const rows = (await readFile(path.join(result.traceDir, "trace.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+		const child = rows.find((row) => row.type === "subagent");
+		expect(await readFile(path.join(child.traceDir, "trace.jsonl"), "utf8")).toContain('"type":"guard"');
+	});
 	it("returns protection advice before the small-file edit policy", async () => {
 		await agent("main", { name: "Main", tools: ["replace_lines"] });
 		const fake = model(["@tool replace_lines\npath: spec.md\nfrom: 1\nto: 1\n---\nchanged\n@end", "Done."]);

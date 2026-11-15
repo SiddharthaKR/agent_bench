@@ -66,6 +66,32 @@ async function traceEvents(dir: string) {
 }
 
 describe("runAgent with a scripted model", () => {
+	it("uses the configured whole-file limit for compile advice", async () => {
+		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "Test", tools: ["compile"], smallFileLines: 2 }));
+		await writeFile(path.join(workspace, "a.v"), "module a;\nbad\nendmodule\n");
+		const model = fakeModel(["@tool compile\nfiles: a.v\n@end", "Done."]);
+		await run(model, async () => ({ code: 1, stderr: "a.v:2: syntax error", stdout: "", timedOut: false, notFound: false }));
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("Hint: a.v has 3 lines. Fix only the reported lines");
+	});
+
+	it("still reminds after a failed write", async () => {
+		const model = fakeModel(["@tool write_file\npath: ../outside.v\n---\nx\n@end", "module a; endmodule", "Done."]);
+		expect((await run(model)).modelCalls).toBe(3);
+		expect(model.requests[2]!.messages.at(-1)!.content).toBe("You put code in your reply, but nothing is saved. Save it with write_file, then test it.");
+	});
+	it.each(["```verilog\nmodule a; endmodule\n```", "module a;\nendmodule"])("reminds once about unsaved code: %s", async (code) => {
+		const model = fakeModel([code, code, "Should not be reached"]);
+		const result = await run(model);
+		expect(result.modelCalls).toBe(2);
+		expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: "user", content: "You put code in your reply, but nothing is saved. Save it with write_file, then test it." });
+		expect(await traceEvents(result.traceDir)).toContainEqual(expect.objectContaining({ type: "guard", reason: expect.stringContaining("nothing is saved") }));
+	});
+
+	it("does not remind after a successful write or a plain answer", async () => {
+		const model = fakeModel(["@tool write_file\npath: a.v\n---\nmodule a; endmodule\n@end", "```verilog\nmodule a; endmodule\n```"]);
+		expect((await run(model)).modelCalls).toBe(2);
+		expect((await run(fakeModel(["No changes needed."]))).modelCalls).toBe(1);
+	});
 	it("reserves the internal malformed-call tool name when adding MCP tools", async () => {
 		await writeFile(path.join(agentDir, "agent.json"), JSON.stringify({ name: "MCP", tools: [], mcp: [{ name: "invalid", command: process.execPath, args: [path.resolve("test/fixtures/mcp-echo-server.mjs"), "--internal-call"], enabled: true }] }));
 		const model = fakeModel(["@tool unknown\n@end", "Done."]);

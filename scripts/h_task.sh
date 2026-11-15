@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-usage() { echo 'Usage: h_task.sh <path to ai_demo> <easy|medium> [server] [model] [-n runs] [-t seconds]' >&2; exit 2; }
+usage() { echo 'Usage: h_task.sh <path to ai_demo> <easy|medium> [server] [model] [-n runs] [-t seconds] [-w workflow.json]' >&2; exit 2; }
 [[ $# -ge 2 ]] || usage
 AI_DEMO="$(cd "$1" && pwd)" || exit 2
 level="$2"
@@ -16,15 +16,23 @@ if [[ $# -gt 0 && "$1" != -* ]]; then server="$1"; shift; fi
 if [[ $# -gt 0 && "$1" != -* ]]; then model="$1"; shift; fi
 runs=1
 seconds=600
+workflow=""
 while [[ $# -gt 0 ]]; do
 	[[ $# -ge 2 ]] || usage
 	case "$1" in
 		-n) runs="$2" ;;
 		-t) seconds="$2" ;;
+		-w) workflow="$2" ;;
 		*) usage ;;
 	esac
 	shift 2
 done
+setup_name=agent
+if [[ -n "$workflow" ]]; then
+	workflow="$(cd "$(dirname "$workflow")" && pwd)/$(basename "$workflow")" || exit 2
+	workflow_name="$(node -e 'const fs = require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).name);' "$workflow")" || exit 2
+	setup_name="workflow $workflow_name"
+fi
 [[ "$runs" =~ ^[1-9][0-9]*$ && "$seconds" =~ ^[1-9][0-9]*$ ]] || usage
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$root/scripts/scoring.sh"
@@ -50,10 +58,24 @@ for ((i=1; i<=runs; i++)); do
 		echo 'Could not prepare the workspace or run folder.' >&2
 	elif mkdir -p "$RUN/agent_bench"; then
 		log="$RUN/agent_bench/agent.log"
-		args=(--server "$server" --folder "$(native "$WS")" --task-file "$(native "$root/tasks/h-$level.md")" --runs "$(native "$RUN/agent_bench")" --max-seconds "$seconds" --protect "tasks/H/gain_spec.md,tasks/H/gain_model.py,tasks/H/fir_spec.md,tasks/H/fir_model.py")
+		args=(--server "$server" --folder "$(native "$WS")" --max-seconds "$seconds" --protect "tasks/H/gain_spec.md,tasks/H/gain_model.py,tasks/H/fir_spec.md,tasks/H/fir_model.py")
+		cli=src/cli.ts
+		if [[ -n "$workflow" ]]; then
+			cli=src/cli-workflow.ts
+			design="pyrpl/$(yaml pyrpl_rtl)/$MODULE.v"
+			if [[ ! -f "$WS/$design" ]]; then
+				found="$(find "$WS" -name "$MODULE.v" -not -path '*/.git/*' | head -1)"
+				[[ -z "$found" ]] || design="$found"
+			fi
+			design="${design#"$WS/"}"
+			tb="$(sed -n 's/.*testbench `\([^`]*\)`.*/\1/p' "$root/tasks/h-$level.md" | head -1 | tr -d '\r')"
+			args+=(--workflow "$(native "$workflow")" --no-pause --task "$(cat "$root/tasks/h-$level.md")" --var "design=$design" --var "tb=$tb")
+		else
+			args+=(--task-file "$(native "$root/tasks/h-$level.md")" --runs "$(native "$RUN/agent_bench")")
+		fi
 		[[ -z "$model" ]] || args+=(--model "$model")
 		echo '=== agent'
-		npx tsx src/cli.ts "${args[@]}" 2>&1 | tee "$log"
+		npx tsx "$cli" "${args[@]}" 2>&1 | tee "$log"
 		agent_code=${PIPESTATUS[0]}
 		echo "agent exit code: $agent_code"
 		calls=$(grep -Ec '^[[:space:]]*[0-9]+\. [[:alnum:]_]+ ' "$log" || true)
@@ -87,7 +109,7 @@ for ((i=1; i<=runs; i++)); do
 	elapsed=$((SECONDS - start))
 	echo "JUDGE: $verdict"
 	echo "run $i: $verdict, $elapsed s"
-	record_result --suite H --level "$level" --server "$server" --model "$record_model" --setup agent --verdict "$verdict" --seconds "$elapsed" "${metrics[@]}"
+	record_result --suite H --level "$level" --server "$server" --model "$record_model" --setup "$setup_name" --verdict "$verdict" --seconds "$elapsed" "${metrics[@]}"
 done
 echo "PASSED $passed of $runs"
 [[ "$passed" == "$runs" ]]

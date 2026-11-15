@@ -28,6 +28,20 @@ function settle(run: WorkflowRun, action: () => void): Promise<void> {
 }
 
 describe("workflow", () => {
+	it("fills retry task on later attempts and appends the failure report", async () => {
+		const tasks: string[] = [];
+		const step = { ...agent, retry: { task: "Repair {design} for {task}" } };
+		const run = createWorkflowRun("r", workflow([step, { ...command, onFail: { goTo: "write", maxRounds: 2 } }]), "Build", deps({
+			runAgent: async (_step, task) => { tasks.push(task); return { ok: true, text: "Attempt" }; },
+			exec: vi.fn().mockResolvedValueOnce(result({ stdout: "FAIL arithmetic" })).mockResolvedValueOnce(result()),
+		}));
+		await settle(run, () => run.start());
+		expect(tasks[0]).toBe("Build: rtl.v");
+		expect(tasks[1]).toContain("Repair rtl.v for Build\n\nThe check");
+		expect(tasks[1]).toContain("FAIL arithmetic");
+		expect(tasks[1]).toContain("Earlier attempts:");
+		expect(validateWorkflow(workflow([{ ...agent, retry: { task: " " } }]))).toContain('Step "write" needs a retry task.');
+	});
 	it.each([false, true])("applies time limit precedence through real adapters (engine: %s)", async (engine) => {
 		const root = await mkdtemp(join(tmpdir(), "workflow-limits-"));
 		vi.useFakeTimers();
