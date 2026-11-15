@@ -145,21 +145,25 @@ export async function loadAgent(agentDir: string, options: LoadAgentOptions = {}
 	const prompt = (await readFile(path.join(agentDir, "prompt.md"), "utf8")).trim();
 	const selected = options.overrides?.tools;
 	for (const name of selected ?? []) {
+		if (name === "use_skill" || name === "ask_agent") continue;
 		if (!agentFile.tools.includes(name)) throw new Error(`Tool "${name}" is not available to agent "${agentFile.name}".`);
 	}
-	const specs = pickTools(selected ?? agentFile.tools);
+	// A step's tool list may name use_skill and ask_agent to keep them; without a list both are on.
+	const keepSkills = selected === undefined || selected.includes("use_skill");
+	const keepAgents = selected === undefined || selected.includes("ask_agent");
+	const specs = pickTools((selected ?? agentFile.tools).filter((name) => name !== "use_skill" && name !== "ask_agent"));
 	// The agent's skills list decides what is always on or offered; a run may preload any skill in the folder.
 	const allSkills = await loadSkills(agentDir);
 	validateSkillNames(allSkills, options.skills ?? [], agentFile.name);
 	const preloaded = new Set(options.skills);
 	const skills = allSkills.filter((skill) => preloaded.has(skill.name) || !agentFile.skills || agentFile.skills.includes(skill.name));
 	const optional = skills.filter((skill) => !skill.always && !preloaded.has(skill.name));
-	if (optional.length && selected === undefined) specs.push(skillTool(optional));
-	if (agentFile.subagents?.length && (options.depth ?? 0) === 0 && selected === undefined) {
+	if (optional.length && keepSkills) specs.push(skillTool(optional));
+	if (agentFile.subagents?.length && (options.depth ?? 0) === 0 && keepAgents) {
 		specs.push(await subagentTool(agentDir, agentFile.subagents, options.runSubagent));
 	}
 	const always = skills.filter((skill) => skill.always || preloaded.has(skill.name)).map((skill) => `## ${skill.name}\n${skill.text}`);
-	const listing = optional.length && selected === undefined ? `\n\nSkills you can load with use_skill:\n${optional.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n")}` : "";
+	const listing = optional.length && keepSkills ? `\n\nSkills you can load with use_skill:\n${optional.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n")}` : "";
 	return { agentFile, specs, systemPrompt: [prompt, ...always, renderToolHelp(specs)].join("\n\n") + listing };
 }
 

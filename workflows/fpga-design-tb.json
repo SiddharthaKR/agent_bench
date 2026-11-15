@@ -13,11 +13,26 @@
 			"agent": "fpga",
 			"name": "Write or fix the design",
 			"task": "{task}\n\nThis step: write only the design {design}. Check it with compile and fix every error. Do not write a testbench or a report in this step.",
+			"tools": [
+				"read_file",
+				"write_file",
+				"replace_lines",
+				"compile",
+				"use_skill"
+			],
 			"maxSeconds": 120,
 			"extra": {
 				"reasoning_effort": "none"
 			},
 			"retry": {
+				"tools": [
+					"read_file",
+					"write_file",
+					"replace_lines",
+					"compile",
+					"run_sim",
+					"use_skill"
+				],
 				"task": "{task}\n\nA check failed; the report is below. Read {design} first, and {tb} if it exists. Decide from the spec which file is wrong and fix only that file. Then run run_sim with files: {design} {tb} if the testbench exists, otherwise compile, until it passes.",
 				"maxSeconds": 180,
 				"extra": {

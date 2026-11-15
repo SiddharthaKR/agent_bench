@@ -69,7 +69,7 @@ for ((i=1; i<=runs; i++)); do
 			fi
 			design="${design#"$WS/"}"
 			tb="$(sed -n 's/.*testbench `\([^`]*\)`.*/\1/p' "$root/tasks/h-$level.md" | head -1 | tr -d '\r')"
-			args+=(--workflow "$(native "$workflow")" --no-pause --task "$(cat "$root/tasks/h-$level.md")" --var "design=$design" --var "tb=$tb")
+			args+=(--workflow "$(native "$workflow")" --no-pause --task-file "$(native "$root/tasks/h-$level.md")" --var "design=$design" --var "tb=$tb")
 		else
 			args+=(--task-file "$(native "$root/tasks/h-$level.md")" --runs "$(native "$RUN/agent_bench")")
 		fi

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
@@ -23,7 +24,7 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 	for (let i = 0; i < argv.length; i++) {
 		const key = argv[i]!;
 		if (key === "--no-pause") { noPause = true; continue; }
-		if (!["--workflow", "--folder", "--task", "--server", "--model", "--var", "--max-seconds", "--skills", "--protect"].includes(key)) throw new Error(`Unknown option ${key}.`);
+		if (!["--workflow", "--folder", "--task", "--task-file", "--server", "--model", "--var", "--max-seconds", "--skills", "--protect"].includes(key)) throw new Error(`Unknown option ${key}.`);
 		const value = argv[++i];
 		if (value === undefined || value.startsWith("--")) throw new Error(`Option ${key} needs a value.`);
 		if (key === "--var") {
@@ -32,6 +33,8 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 			vars[value.slice(0, equal)] = value.slice(equal + 1);
 		} else values[key.slice(2)] = value;
 	}
+	// A task with several lines cannot be passed as an argument on Windows; it is cut at the first line.
+	if (values["task-file"] !== undefined) values.task = readFileSync(values["task-file"], "utf8").trim();
 	for (const key of ["workflow", "folder", "task"]) if (!values[key]) throw new Error(`Give --${key}.`);
 	const maxSeconds = values["max-seconds"] === undefined ? undefined : Number(values["max-seconds"]);
 	if (maxSeconds !== undefined && (!Number.isFinite(maxSeconds) || maxSeconds <= 0)) throw new Error("--max-seconds must be a positive number.");
@@ -40,7 +43,7 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 
 export async function workflowMain(argv: string[]): Promise<number> {
 	if (argv.includes("--help")) {
-		console.log("Usage: workflow --workflow file.json --folder path --task text [--server name] [--model name] [--var name=value] [--no-pause] [--max-seconds seconds] [--skills a,b] [--protect a,b]\n--max-seconds limits each agent step, not the whole workflow.");
+		console.log("Usage: workflow --workflow file.json --folder path (--task text | --task-file path) [--server name] [--model name] [--var name=value] [--no-pause] [--max-seconds seconds] [--skills a,b] [--protect a,b]\n--max-seconds limits each agent step, not the whole workflow.");
 		return 0;
 	}
 	const args = parseWorkflowArgs(argv);

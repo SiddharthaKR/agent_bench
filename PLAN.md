@@ -156,6 +156,12 @@ The improvement loop: measure on a tuning set, read the failed runs, make a gene
 
 "Industry level" is measured separately from pass or fail by a quality gate (brief U, being built): latches, blocking and non-blocking misuse, multiple drivers, plus Verilator and Yosys where installed.
 
+**Where the session stopped (2026-11-15, about 13:40, usage limit):**
+- Old harness easy task: 0 of 5 more runs. Single agent: data path right in most runs (16 of 16 cases), register read-back wrong (sign extension, unknown addresses, the constant). The three `fpga-design-tb` workflow runs were **invalid**: on Windows the multi-line `--task` text was cut at its first line and the `--var` paths after it were dropped, so the run used `rtl/design.v`. Fixed (`--task-file` for the workflow command line, used by `h_task.sh`), tests pass, **not yet rerun**.
+- Also fixed, not yet measured: a step's `tools` list may name `use_skill` and `ask_agent`; the design step of `fpga-design-tb` no longer has `run_sim` or sub-agents on its first round (it wasted its time limit calling them).
+- Next: rerun `bash scripts/h_task.sh <ai_demo> easy local -n 3 -t 180 -w workflows/fpga-design-tb.json` from a frozen copy; then decide about listing the `bus-registers` skill and adding a "check the design against every spec line" step, since read-back is where the real task and the held-out `regbank` task fail.
+- Comment-policy and skill-set comparisons are not done.
+
 Queued for Codex at 15:16 on 2026-11-15, in order: S (agent asks the user instead of guessing), T (VerilogEval runner), U (quality gate).
 
 - [x] Retry-workflow score read (1 of 4, retries were broken); fixed and re-measured (4 of 4 on gain with `fpga-fast`).
