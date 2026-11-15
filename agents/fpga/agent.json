@@ -18,6 +18,7 @@
 	"skills": [
 		"verilog-rules",
 		"fixed-point",
-		"bus-registers"
+		"bus-registers",
+		"reset-and-state"
 	]
 }
