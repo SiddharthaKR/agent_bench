@@ -80,6 +80,79 @@ function open(model: ReturnType<typeof fakeModel>, askFirst: boolean, exec: Exec
 const WRITE = "I will create the file.\n@tool write_file\npath: a.v\n---\nmodule a;\nendmodule\n@end";
 
 describe("session", () => {
+	async function configureSubagent() {
+		await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "FPGA agent", tools: ["read_file"], subagents: ["helper"] }));
+		const dir = path.join(root, "agents", "helper");
+		await mkdir(dir);
+		await writeFile(path.join(dir, "agent.json"), JSON.stringify({ name: "Helper", tools: ["write_file"] }));
+		await writeFile(path.join(dir, "prompt.md"), "Write the requested file.");
+	}
+
+	it("approves delegation once and forwards child progress as notes", async () => {
+		await configureSubagent();
+		const model = fakeModel(["@tool ask_agent\nagent: helper\n---\nCreate a.v\n@end", WRITE, "Created it.", "Done."]);
+		const session = await open(model, true);
+		const done = idleAfterWork(session);
+		session.send("Delegate it.");
+		const proposal = await until(session, (event) => event.type === "proposal" && event.state === "pending") as Extract<SessionEvent, { type: "proposal" }>;
+		expect(proposal).toMatchObject({ path: "ask_agent: helper", isNew: true, diff: [{ kind: "add", text: "Create a.v", line: 1 }] });
+		expect(model.requests).toHaveLength(1);
+		session.resolve(proposal.id, true);
+		await done;
+		expect(session.events.filter((event) => event.type === "proposal")).toHaveLength(1);
+		expect(session.events.some((event) => event.type === "note" && event.tone === "info" && event.text.startsWith("  helper") && event.text.includes("write_file"))).toBe(true);
+		expect(session.events.some((event) => event.type === "file" && event.path.startsWith("ask_agent:"))).toBe(false);
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toContain("module a;");
+		expect(model.requests.at(-1)!.messages.at(-1)!.content).toContain("Helper finished: Created it.");
+	});
+
+	it("rejects delegation before starting the child", async () => {
+		await configureSubagent();
+		const model = fakeModel(["@tool ask_agent\nagent: helper\n---\nCreate a.v\n@end", "Understood."]);
+		const session = await open(model, true);
+		const done = idleAfterWork(session);
+		session.send("Delegate it.");
+		const proposal = await until(session, (event) => event.type === "proposal" && event.state === "pending") as Extract<SessionEvent, { type: "proposal" }>;
+		session.resolve(proposal.id, false);
+		await done;
+		expect(model.requests).toHaveLength(2);
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("rejected");
+		await expect(stat(path.join(workspace, "a.v"))).rejects.toThrow();
+	});
+
+	it("runs delegation without an approval proposal when asking is off", async () => {
+		await configureSubagent();
+		const model = fakeModel(["@tool ask_agent\nagent: helper\n---\nInspect it\n@end", "Looks fine.", "Done."]);
+		const session = await open(model, false);
+		const done = idleAfterWork(session);
+		session.send("Delegate it.");
+		await done;
+		expect(session.events.some((event) => event.type === "proposal")).toBe(false);
+		expect(model.requests.at(-1)!.messages.at(-1)!.content).toContain("Helper finished: Looks fine.");
+	});
+
+	it("stops a delegated model request when the session is stopped", async () => {
+		await configureSubagent();
+		let started!: () => void;
+		const childStarted = new Promise<void>((resolve) => { started = resolve; });
+		let aborted = false;
+		let calls = 0;
+		const fetchFn: typeof fetch = async (_url, init) => {
+			init?.signal?.throwIfAborted();
+			if (++calls === 1) return new Response(JSON.stringify({ choices: [{ message: { content: "@tool ask_agent\nagent: helper\n---\nWait\n@end" }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } });
+			return new Promise<Response>((_resolve, reject) => {
+				started();
+				init?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("Stopped")); }, { once: true });
+			});
+		};
+		const session = await open({ fetchFn, requests: [] }, false);
+		const done = idleAfterWork(session);
+		session.send("Delegate it.");
+		await childStarted;
+		session.stop();
+		await done;
+		expect(aborted).toBe(true);
+	});
 	it("appends unchanged check hints to both the model result and session event", async () => {
 		await writeFile(path.join(workspace, "a.v"), "module a endmodule\n");
 		const model = fakeModel([

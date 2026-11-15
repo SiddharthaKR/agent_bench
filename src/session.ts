@@ -19,6 +19,8 @@ import type { SessionEvent, StepStatus } from "./shared/api.ts";
 import type { Session } from "./shared/engine.ts";
 import { realExec, resolveInWorkspace } from "./tools/index.ts";
 import { createTrace } from "./trace.ts";
+import { createSubagentRunner } from "./subagent.ts";
+import type { SubagentRunner } from "./subagent.ts";
 import type { CommandConfig, Exec, ToolContext } from "./types.ts";
 
 export interface SessionOptions {
@@ -75,11 +77,14 @@ function keyOf(event: SessionEvent): string | null {
 }
 
 function targetOf(args: Record<string, unknown>): string {
-	return String(args.path ?? args.files ?? "");
+	return String(args.path ?? args.files ?? args.agent ?? "");
 }
 
 export async function createSession(options: SessionOptions): Promise<Session> {
-	const { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir);
+	let runSubagent: SubagentRunner;
+	const { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir, {
+		runSubagent: (id, task, signal) => runSubagent(id, task, signal),
+	});
 	const ctx: ToolContext = { workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
 	const trace = createTrace(options.runsDir, `${path.basename(options.agentDir)}-session`);
 	trace.write({ type: "run_start", agent: agentFile.name, model: options.server.model, workspace: ctx.workspace, promptChars: systemPrompt.length, systemPrompt });
@@ -120,6 +125,9 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 	};
 	const nextId = (prefix: string) => `${prefix}${++counter}`;
 	const note = (text: string, tone: "info" | "bad" = "info") => emit({ type: "note", id: nextId("n"), text, tone });
+	let deadline: number | undefined;
+	runSubagent = createSubagentRunner({ ...options, task: "", onStep: (line) => note(line) }, trace,
+		() => deadline === undefined ? undefined : Math.max(0, (deadline - Date.now()) / 1000));
 
 	const agent = new Agent({
 		initialState: {
@@ -154,8 +162,12 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 				refused.set(toolCall.id, "blocked");
 				return { block: true, reason: refusal };
 			}
-			if (!EDIT_TOOLS.has(toolCall.name)) return undefined;
-			const preview = await previewEdit(toolCall.name, typed, ctx.workspace);
+			const delegation = toolCall.name === "ask_agent";
+			if (delegation && !askFirst) return undefined;
+			if (!delegation && !EDIT_TOOLS.has(toolCall.name)) return undefined;
+			const preview = delegation
+				? { path: `ask_agent: ${String(typed.agent ?? "")}`, before: "", after: String(typed.content ?? ""), isNew: true }
+				: await previewEdit(toolCall.name, typed, ctx.workspace);
 			if (!preview) return undefined;
 			const proposal: Extract<SessionEvent, { type: "proposal" }> = {
 				type: "proposal",
@@ -232,12 +244,13 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 			trace.write({ type: "tool_result", tool: event.toolName, ok: !event.isError, ms: event.durationMs ?? 0, text: result });
 			if (step) emit({ ...step, status, result, ...(event.durationMs !== undefined ? { ms: Math.round(event.durationMs) } : {}) });
 			const proposal = proposals.get(event.toolCallId);
-			if (status === "ok" && proposal) emit({ type: "file", path: proposal.path });
+			if (status === "ok" && proposal && EDIT_TOOLS.has(event.toolName)) emit({ type: "file", path: proposal.path });
 		}
 	});
 
 	const run = async (text: string) => {
 		busy = true;
+		deadline = agentFile.maxSeconds === undefined ? undefined : Date.now() + agentFile.maxSeconds * 1000;
 		guard = new LoopGuard({ maxCalls: agentFile.maxTurns ?? 40 });
 		emit({ type: "status", state: "working" });
 		const timer = agentFile.maxSeconds !== undefined ? setTimeout(() => {

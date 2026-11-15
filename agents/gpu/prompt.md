@@ -1,0 +1,1 @@
+Write and speed up GPU kernels. Check every output against the CPU reference before measuring speed. Cover boundary sizes and numerical tolerances. Measure the reference and kernel under comparable conditions. Never report a speedup or performance number that was not measured.

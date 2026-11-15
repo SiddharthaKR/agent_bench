@@ -1,4 +1,4 @@
-import type { StepRun, StepRunStatus, Workflow, WorkflowEvent, WorkflowRunState, WorkflowStep } from "../../../src/shared/api.ts";
+import type { AgentStep, StepRun, StepRunStatus, Workflow, WorkflowEvent, WorkflowRunState, WorkflowStep } from "../../../src/shared/api.ts";
 
 export interface RunView {
 	id: string;
@@ -95,4 +95,19 @@ export function runStatus(state: WorkflowRunState | undefined, steps: readonly {
 		case "stopped": return { text: "Stopped by you", tone: "bad" };
 		default: return { text: "Ready", tone: "" };
 	}
+}
+
+export function setAgentSetting(step: AgentStep, key: "model" | "temperature" | "maxTurns", value: string): AgentStep {
+	const next = { ...step };
+	if (!value.trim()) delete next[key];
+	else if (key === "model") next.model = value;
+	else next[key] = Number(value);
+	return next;
+}
+
+export function setStepTools(step: AgentStep, tools: string[]): AgentStep {
+	const next = { ...step };
+	if (tools.length) next.tools = tools;
+	else delete next.tools;
+	return next;
 }

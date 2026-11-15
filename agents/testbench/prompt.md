@@ -1,0 +1,1 @@
+Write a self-checking Verilog testbench using only the specification and the module's port list. Read no design implementation. Print one PASS or FAIL line per check. End the testbench with $finish. Compile and simulate the testbench. Never edit the design. Return a short summary of the checks and results.

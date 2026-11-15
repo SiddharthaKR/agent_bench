@@ -1,13 +1,7 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
-import { runAgent } from "./agent.ts";
-import { loadConfig } from "./config.ts";
-import type { Workflow } from "./shared/api.ts";
-import { realExec } from "./tools/index.ts";
-import { createWorkflowRun } from "./workflow.ts";
+import { prepareWorkflowRun } from "./index.ts";
 
 export interface WorkflowArgs {
 	workflow: string;
@@ -45,27 +39,7 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 export async function workflowMain(argv: string[]): Promise<number> {
 	const args = parseWorkflowArgs(argv);
 	const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-	const config = await loadConfig(root);
-	const server = config.servers[args.server];
-	if (!server) throw new Error(`No model server named "${args.server}" in config.json.`);
-	const workflow = JSON.parse(await readFile(args.workflow, "utf8")) as Workflow;
-	workflow.vars = { ...workflow.vars, ...args.vars };
-	const workspace = path.resolve(args.folder);
-	const run = createWorkflowRun(randomUUID(), workflow, args.task, {
-		workspace,
-		exec: realExec,
-		runAgent: async (step, task, signal, onLine) => {
-			if (!/^[A-Za-z0-9_-]+$/.test(step.agent)) throw new Error("Invalid agent name.");
-			const result = await runAgent({
-				agentDir: path.join(root, "agents", step.agent), workspace, task,
-				server: { ...server, model: args.model ?? server.model }, commands: config.commands,
-				runsDir: path.join(root, "runs"), exec: realExec, signal, onStep: onLine, maxSeconds: args.maxSeconds,
-			});
-			if (result.finalText) onLine(result.finalText);
-			if (result.reason === "time") onLine("Ended: time");
-			return { ok: result.reason === "done", text: result.finalText || result.error || `The agent ended with: ${result.reason}.` };
-		},
-	});
+	const { run, workflow } = await prepareWorkflowRun({ ...args, root });
 	const stop = () => run.stop();
 	process.once("SIGINT", stop);
 	try {

@@ -1,0 +1,1 @@
+Prepare neural networks for an FPGA DPU. Check the float model, quantize first, then compile for the target. Use representative calibration data and compare deployed output with the reference. Report accuracy before and after quantization and deployment. Never claim an accuracy, latency or other number that was not measured.

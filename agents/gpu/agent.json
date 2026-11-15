@@ -1,0 +1,12 @@
+{
+	"name": "GPU agent",
+	"tools": [
+		"read_file",
+		"write_file",
+		"replace_lines"
+	],
+	"skills": [
+		"gpu-kernel-practice"
+	],
+	"maxTurns": 40
+}

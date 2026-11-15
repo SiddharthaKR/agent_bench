@@ -27,6 +27,9 @@ export function validateWorkflow(workflow: Workflow): string[] {
 		if (step.type === "agent") {
 			if (!step.agent.trim()) problems.push(`Step "${step.id}" needs an agent.`);
 			if (!step.task.trim()) problems.push(`Step "${step.id}" needs a task.`);
+			if (step.temperature !== undefined && (!Number.isFinite(step.temperature) || step.temperature < 0 || step.temperature > 2)) problems.push(`Step "${step.id}" needs a temperature between 0 and 2.`);
+			if (step.maxTurns !== undefined && (!Number.isInteger(step.maxTurns) || step.maxTurns < 1)) problems.push(`Step "${step.id}" needs at least one turn.`);
+			if (step.tools !== undefined && step.tools.length === 0) problems.push(`Step "${step.id}" needs at least one tool.`);
 		} else if (!step.command.length || !step.command[0]?.trim()) {
 			problems.push(`Step "${step.id}" needs a command.`);
 		}

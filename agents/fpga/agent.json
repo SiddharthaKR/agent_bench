@@ -2,5 +2,6 @@
 	"name": "FPGA agent",
 	"tools": ["read_file", "write_file", "replace_lines", "compile", "run_sim"],
 	"maxTurns": 40,
+	"subagents": ["testbench", "verifier"],
 	"maxSeconds": 600
 }

@@ -22,7 +22,7 @@ const port = Number(option("port", process.env.PORT ?? "4600"));
 const folder = path.resolve(option("folder", process.cwd()));
 
 const engine = createEngine({ root: ROOT, defaultFolder: folder });
-const server = createAppServer(engine, { webDir: path.join(ROOT, "web", "dist"), runsDirs: [path.join(ROOT, "runs")] });
+const server = createAppServer(engine, { agentsDir: path.join(ROOT, "agents"), webDir: path.join(ROOT, "web", "dist"), runsDirs: [path.join(ROOT, "runs")] });
 
 server.listen(port, "127.0.0.1", () => {
 	console.log(`Agent Bench is running at http://localhost:${port}`);

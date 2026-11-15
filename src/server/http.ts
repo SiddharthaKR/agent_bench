@@ -1,3 +1,5 @@
+import { AgentStoreError, createAgent, deleteAgent, listAgentDetails, readAgentDetail, saveAgent } from "../agent-store.ts";
+import type { AgentUpdate } from "../shared/agents.ts";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Engine, Session, WorkflowRun } from "../shared/engine.ts";
@@ -12,6 +14,7 @@ export interface ServerOptions {
 	/** Folder holding the built browser app (index.html, assets). Optional. */
 	webDir?: string;
 	runsDirs?: string[];
+	agentsDir?: string;
 }
 
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -53,6 +56,28 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 		try { pathname = decodeURIComponent(rawUrl.split("?")[0] ?? "/"); }
 		catch { throw new HttpError(400, "Invalid URL."); }
 		const query = new URL(rawUrl, "http://localhost").searchParams;
+		if (pathname === "/api/agents" || /^\/api\/agents\/[^/]+$/.test(pathname)) {
+			const id = pathname === "/api/agents" ? undefined : pathname.slice("/api/agents/".length);
+			if (id === undefined) {
+				if (request.method !== "GET" && request.method !== "POST") throw new HttpError(405, "Method not allowed.");
+			} else if (!["GET", "PUT", "DELETE"].includes(request.method ?? "")) throw new HttpError(405, "Method not allowed.");
+			if (!options.agentsDir) throw new HttpError(500, "Agents folder is not configured.");
+			try {
+				if (id === undefined) {
+					if (request.method === "GET") return sendJson(response, await listAgentDetails(options.agentsDir));
+					const body = record(await readJson(request));
+					return sendJson(response, await createAgent(options.agentsDir, stringField(body.id, "Id"), stringField(body.name, "Name")));
+				}
+				if (request.method === "GET") return sendJson(response, await readAgentDetail(options.agentsDir, id));
+				if (request.method === "PUT") return sendJson(response, await saveAgent(options.agentsDir, id, record(await readJson(request)) as unknown as AgentUpdate));
+				await readJson(request, true);
+				await deleteAgent(options.agentsDir, id);
+				return sendJson(response, { ok: true });
+			} catch (error) {
+				if (error instanceof AgentStoreError) throw new HttpError(error.status, error.message);
+				throw error;
+			}
+		}
 		if (pathname === "/api/traces") {
 			method(request, "GET");
 			const traces = new Map<string, TraceInfo>();

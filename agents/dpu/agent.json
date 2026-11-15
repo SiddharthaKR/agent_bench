@@ -1,0 +1,12 @@
+{
+	"name": "DPU agent",
+	"tools": [
+		"read_file",
+		"write_file",
+		"replace_lines"
+	],
+	"skills": [
+		"dpu-deploy-flow"
+	],
+	"maxTurns": 40
+}

@@ -1,3 +1,4 @@
+import { AgentsScreen } from "./agents/AgentsScreen.tsx";
 import { useEffect, useState } from "react";
 import type { AppConfig } from "../../src/shared/api.ts";
 import { api } from "./api.ts";
@@ -17,7 +18,7 @@ export interface ScreenProps {
 	setFolder: (folder: string) => void;
 }
 
-type View = "work" | "workflows" | "trace";
+type View = "work" | "workflows" | "trace" | "agents";
 
 function stored(key: string, fallback: string): string {
 	try {
@@ -40,12 +41,14 @@ export function App() {
 	const [error, setError] = useState("");
 	const [view, setView] = useState<View>(() => {
 		const saved = stored("ab.view", "work");
-		return saved === "workflows" || saved === "trace" ? saved : "work";
+		return saved === "workflows" || saved === "trace" || saved === "agents" ? saved : "work";
 	});
 	const [dark, setDark] = useState(() => stored("ab.theme", "light") === "dark");
 	const [agent, setAgent] = useState(() => stored("ab.agent", ""));
 	const [server, setServer] = useState(() => stored("ab.server", ""));
 	const [folder, setFolderState] = useState(() => stored("ab.folder", ""));
+
+	const reloadConfig = () => api.config().then(setConfig, (e: Error) => setError(e.message));
 
 	useEffect(() => {
 		api.config().then(setConfig, (e: Error) => setError(e.message));
@@ -92,6 +95,7 @@ export function App() {
 					<button type="button" className="btn" aria-pressed={view === "trace"} onClick={() => go("trace")}>
 						Trace
 					</button>
+					<button type="button" className="btn" aria-pressed={view === "agents"} onClick={() => go("agents")}>Agents</button>
 				</nav>
 				<div className="spacer" />
 				<label className="check">
@@ -143,6 +147,9 @@ export function App() {
 				</div>
 				<div hidden={view !== "trace"} style={{ height: "100%" }}>
 					<TraceScreen {...props} />
+				</div>
+				<div hidden={view !== "agents"} style={{ height: "100%" }}>
+					<AgentsScreen {...props} onChanged={reloadConfig} />
 				</div>
 			</main>
 		</div>

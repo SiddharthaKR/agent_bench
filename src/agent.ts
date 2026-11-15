@@ -11,6 +11,8 @@ import { Type } from "typebox";
 import { LoopGuard } from "./guard.ts";
 import { trimContext } from "./context.ts";
 import { loadSkills, skillTool } from "./skills.ts";
+import { createSubagentRunner, subagentTool } from "./subagent.ts";
+import type { SubagentRunner } from "./subagent.ts";
 import { smallFileRefusal } from "./tools/edit_policy.ts";
 import type { ServerConfig } from "./model.ts";
 import { createStreamFn, makeModel } from "./model.ts";
@@ -27,6 +29,7 @@ export interface AgentFile {
 	smallFileLines?: number;
 	trimContext?: boolean;
 	maxSeconds?: number;
+	subagents?: string[];
 }
 
 export interface RunOptions {
@@ -45,6 +48,14 @@ export interface RunOptions {
 	onStep?: (line: string) => void;
 	signal?: AbortSignal;
 	maxSeconds?: number;
+	depth?: number;
+	overrides?: { maxTurns?: number; tools?: string[] };
+}
+
+export interface LoadAgentOptions {
+	depth?: number;
+	overrides?: RunOptions["overrides"];
+	runSubagent?: SubagentRunner;
 }
 
 export type EndReason = "done" | "loop" | "limit" | "error" | "aborted" | "time";
@@ -113,25 +124,40 @@ function short(text: string, max = 110): string {
 }
 
 /** Reads an agent folder and builds its system prompt. */
-export async function loadAgent(agentDir: string): Promise<{ agentFile: AgentFile; specs: ToolSpec[]; systemPrompt: string }> {
+export async function loadAgent(agentDir: string, options: LoadAgentOptions = {}): Promise<{ agentFile: AgentFile; specs: ToolSpec[]; systemPrompt: string }> {
 	const agentFile = JSON.parse(await readFile(path.join(agentDir, "agent.json"), "utf8")) as AgentFile;
 	const prompt = (await readFile(path.join(agentDir, "prompt.md"), "utf8")).trim();
-	const specs = pickTools(agentFile.tools);
+	const selected = options.overrides?.tools;
+	for (const name of selected ?? []) {
+		if (!agentFile.tools.includes(name)) throw new Error(`Tool "${name}" is not available to agent "${agentFile.name}".`);
+	}
+	const specs = pickTools(selected ?? agentFile.tools);
 	const skills = await loadSkills(agentDir, agentFile.skills);
 	const optional = skills.filter((skill) => !skill.always);
-	if (optional.length) specs.push(skillTool(optional));
+	if (optional.length && selected === undefined) specs.push(skillTool(optional));
+	if (agentFile.subagents?.length && (options.depth ?? 0) === 0 && selected === undefined) {
+		specs.push(await subagentTool(agentDir, agentFile.subagents, options.runSubagent));
+	}
 	const always = skills.filter((skill) => skill.always).map((skill) => `## ${skill.name}\n${skill.text}`);
-	const listing = optional.length ? `\n\nSkills you can load with use_skill:\n${optional.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n")}` : "";
+	const listing = optional.length && selected === undefined ? `\n\nSkills you can load with use_skill:\n${optional.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n")}` : "";
 	return { agentFile, specs, systemPrompt: [prompt, ...always, renderToolHelp(specs)].join("\n\n") + listing };
 }
 
 export async function runAgent(options: RunOptions): Promise<RunResult> {
 	const started = Date.now();
-	const { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir);
+	let runSubagent: SubagentRunner;
+	const { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir, {
+		depth: options.depth,
+		overrides: options.overrides,
+		runSubagent: (...args) => runSubagent(...args),
+	});
 
 	const trace = createTrace(options.runsDir, path.basename(options.agentDir));
 	const ctx: ToolContext = { workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
-	const guard = new LoopGuard({ maxCalls: agentFile.maxTurns ?? 40 });
+	const guard = new LoopGuard({ maxCalls: options.overrides?.maxTurns ?? agentFile.maxTurns ?? 40 });
+	const seconds = options.maxSeconds ?? agentFile.maxSeconds;
+	const remainingSeconds = () => seconds === undefined ? undefined : Math.max(0, seconds - (Date.now() - started) / 1000);
+	runSubagent = createSubagentRunner(options, trace, remainingSeconds);
 
 	let stoppedBy: EndReason | undefined;
 	let modelCalls = 0;
@@ -150,7 +176,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		server: options.server.baseUrl,
 		workspace: ctx.workspace,
 		task: options.task,
-		tools: agentFile.tools,
+		tools: specs.map((spec) => spec.name),
 		promptChars: systemPrompt.length,
 		systemPrompt,
 	});
@@ -209,13 +235,12 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
 	const abort = () => agent.abort();
 	options.signal?.addEventListener("abort", abort, { once: true });
-	const seconds = options.maxSeconds ?? agentFile.maxSeconds;
 	let timedOut = false;
-	const timer = seconds !== undefined ? setTimeout(() => { timedOut = true; agent.abort(); }, seconds * 1000) : undefined;
+	const timer = seconds !== undefined ? setTimeout(() => { timedOut = true; agent.abort(); }, remainingSeconds()! * 1000) : undefined;
 
 	let error: string | undefined;
 	try {
-		await agent.prompt(options.task);
+		if (!options.signal?.aborted) await agent.prompt(options.task);
 	} catch (thrown) {
 		error = (thrown as Error).message;
 	} finally {

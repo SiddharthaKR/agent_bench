@@ -1,0 +1,4 @@
+{
+	"name": "Verifier",
+	"tools": ["read_file", "run_sim"]
+}

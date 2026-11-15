@@ -1,3 +1,4 @@
+import type { AgentDetail, AgentUpdate } from "../../src/shared/agents.ts";
 /** Calls to the local server. Every screen goes through these. */
 import type {
 	AppConfig,
@@ -24,6 +25,11 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 const q = (params: Record<string, string>) => new URLSearchParams(params).toString();
 
 export const api = {
+	agents: () => call<AgentDetail[]>("GET", "/api/agents"),
+	agent: (id: string) => call<AgentDetail>("GET", `/api/agents/${encodeURIComponent(id)}`),
+	createAgent: (id: string, name: string) => call<AgentDetail>("POST", "/api/agents", { id, name }),
+	saveAgent: (id: string, update: AgentUpdate) => call<AgentDetail>("PUT", `/api/agents/${encodeURIComponent(id)}`, update),
+	deleteAgent: (id: string) => call<{ ok: true }>("DELETE", `/api/agents/${encodeURIComponent(id)}`),
 	traces: () => call<TraceInfo[]>("GET", "/api/traces"),
 	trace: (id: string) => call<TraceDetail>("GET", `/api/traces/${encodeURIComponent(id)}`),
 	config: () => call<AppConfig>("GET", "/api/config"),

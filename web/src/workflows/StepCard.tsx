@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AgentInfo, StepRun, WorkflowStep } from "../../../src/shared/api.ts";
-import { commandToText, parseCommand, stepStatus } from "./logic.ts";
+import { commandToText, parseCommand, setAgentSetting, setStepTools, stepStatus } from "./logic.ts";
 
 interface Props {
 	step: WorkflowStep;
@@ -56,10 +56,15 @@ export function StepCard(props: Props) {
 					change(event.target.value === "agent" ? { ...base, type: "agent", agent: props.agents[0]?.id ?? "", task: "" } : { ...base, type: "command", command: [], timeoutSec: 60 });
 				}}><option value="agent">Agent step, uses the model</option><option value="command">Command step, no model</option></select></label>
 				{step.type === "agent" ? <>
-					<label>Agent<select className="input" value={step.agent} onChange={(event) => change({ ...step, agent: event.target.value })}>
+					<label>Agent<select className="input" value={step.agent} onChange={(event) => change(setStepTools({ ...step, agent: event.target.value }, []))}>
 						{!props.agents.some((agent) => agent.id === step.agent) && <option value={step.agent}>{step.agent || "Choose an agent"}</option>}
 						{props.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} ({agent.id})</option>)}
 					</select></label>
+					<div className="wf-wide label">Settings for this step</div>
+					<label>Model<input className="input" placeholder="server default" value={step.model ?? ""} onChange={(event) => change(setAgentSetting(step, "model", event.target.value))} /></label>
+					<label>Temperature<input className="input" type="number" step={0.1} placeholder="server default" value={step.temperature ?? ""} onChange={(event) => change(setAgentSetting(step, "temperature", event.target.value))} /></label>
+					<label>Most tool calls<input className="input" type="number" min={1} max={200} placeholder="agent default" value={step.maxTurns ?? ""} onChange={(event) => change(setAgentSetting(step, "maxTurns", event.target.value))} /></label>
+					<div className="wf-wide"><span className="label">Tools</span>{(props.agents.find((agent) => agent.id === step.agent)?.tools ?? []).map((tool) => <label className="check" key={tool}><input type="checkbox" checked={step.tools?.includes(tool) ?? false} onChange={(event) => change(setStepTools(step, event.target.checked ? [...(step.tools ?? []), tool] : (step.tools ?? []).filter((name) => name !== tool)))} /><span className="mono">{tool}</span></label>)}<div className="small muted">All unchecked uses the agent's own tools.</div></div>
 					<label className="wf-wide">Task<textarea className="input" rows={3} value={step.task} onChange={(event) => change({ ...step, task: event.target.value })} /></label>
 				</> : <>
 					<CommandField command={step.command} change={(command) => change({ ...step, command })} />
