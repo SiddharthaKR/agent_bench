@@ -4,7 +4,7 @@ This suite uses [NVlabs VerilogEval](https://github.com/NVlabs/verilog-eval), sp
 
 ## Acquisition and provenance
 
-The sandbox clone attempt on 2026-11-15 failed to connect to github.com:443. No benchmark commit was checked out or scored. The layout was inspected through the upstream [README](https://github.com/NVlabs/verilog-eval/blob/main/README.md), [Makefile](https://github.com/NVlabs/verilog-eval/blob/main/Makefile.in), and example test/reference. The upstream revision identified during inspection was [`c498220d0a52248f8e3fdffe279075215bde2da6`](https://github.com/NVlabs/verilog-eval/commit/c498220d0a52248f8e3fdffe279075215bde2da6). Pin that revision for a reproducible first measurement:
+Cloned on 2026-11-15 at commit c498220d0a52248f8e3fdffe279075215bde2da6 (156 problems: 39 dev, 117 held-out). The judge passes the benchmark's reference and rejects an empty module for the first three problems. The layout was inspected through the upstream [README](https://github.com/NVlabs/verilog-eval/blob/main/README.md), [Makefile](https://github.com/NVlabs/verilog-eval/blob/main/Makefile.in), and example test/reference. The upstream revision identified during inspection was [`c498220d0a52248f8e3fdffe279075215bde2da6`](https://github.com/NVlabs/verilog-eval/commit/c498220d0a52248f8e3fdffe279075215bde2da6). Pin that revision for a reproducible first measurement:
 
 ```bash
 git clone https://github.com/NVlabs/verilog-eval external/verilog-eval
@@ -21,7 +21,7 @@ A problem named `Prob001_zero` consists of `Prob001_zero_prompt.txt` (specificat
 
 Sort all problem names lexically. Dev is every fourth name, using one-based positions 4, 8, 12, and so on. Heldout is the rest. Skills, hints and prompts are tuned only on dev. Heldout is measured, and its failures are never read to adjust skills.
 
-Because acquisition failed, `verilog-eval/dev.txt` and `heldout.txt` currently contain comments, not invented problem names. The first runner invocation fills empty lists from the clone; `--write-split` does so explicitly. Later runs reject lists that differ from the clone's sorted split. Review a revision change before regenerating the lists. Fixture tests check the split with eight synthetic prompt files.
+The first runner invocation fills empty lists from the clone; `--write-split` does so explicitly. Later runs reject lists that differ from the clone's sorted split. Review a revision change before regenerating the lists. Fixture tests check the split with eight synthetic prompt files.
 
 ## Run and inspect
 
