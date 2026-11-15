@@ -17,7 +17,7 @@ import { loadSkills, skillTool, validateSkillNames } from "./skills.ts";
 import { createSubagentRunner, subagentTool } from "./subagent.ts";
 import type { SubagentRunner } from "./subagent.ts";
 import type { ProtectedContext } from "./tools/edit_policy.ts";
-import { NO_TESTBENCH, taskWantsTestbench, protectedRefusal, smallFileRefusal } from "./tools/edit_policy.ts";
+import { NO_TESTBENCH, looksLikeTestbench, taskWantsTestbench, protectedRefusal, smallFileRefusal } from "./tools/edit_policy.ts";
 import type { ServerConfig } from "./model.ts";
 import { createStreamFn, makeModel } from "./model.ts";
 import { INVALID_CALL, renderToolHelp } from "./protocol.ts";
@@ -318,7 +318,10 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 			for (let round = 0; compileSpec && round < 2; round++) {
 				const lastReply = [...agent.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
 				if (uncompiled.size === 0 || timedOut || stoppedBy || options.signal?.aborted || lastReply?.stopReason !== "stop") break;
-				const files = [...touched].join(" ");
+				// Only the design must compile for a run to end; a testbench of the model's own that does not compile is not worth more rounds.
+				const designs = [...touched].filter((file) => !looksLikeTestbench(file));
+				if (designs.length === 0 || ![...uncompiled].some((file) => !looksLikeTestbench(file))) break;
+				const files = designs.join(" ");
 				const checked = await compileSpec.run({ files }, ctx);
 				trace.write({ type: "guard", reason: `Final check: compile ${files}: ${checked.ok ? "ok" : "failed"}`, stop: false });
 				say(`     final check: compile ${files} ${checked.ok ? "✓" : "✗"}`);
