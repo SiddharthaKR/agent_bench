@@ -6,6 +6,7 @@
 		"design": "rtl/design.v",
 		"tb": "tb/tb_design.v"
 	},
+	"protect": ["{tb}"],
 	"steps": [
 		{
 			"id": "write",

@@ -14,7 +14,7 @@ import type { AgentInfo, Workflow } from "./shared/api.ts";
 import type { Engine } from "./shared/engine.ts";
 import { realExec } from "./tools/index.ts";
 import type { CommandConfig, Exec } from "./types.ts";
-import { createWorkflowRun } from "./workflow.ts";
+import { createWorkflowRun, fillPlaceholders, prepareWorkflowSkills } from "./workflow.ts";
 
 export interface EngineOptions {
 	/** Folder holding config.json, agents/ and workflows/. */
@@ -88,6 +88,7 @@ export function createEngine(options: EngineOptions): Engine {
 				commands,
 				runsDir,
 				askFirst: request.askFirst,
+				protect: request.protect,
 				exec,
 				fetchFn: options.fetchFn,
 			});
@@ -118,17 +119,20 @@ export function createEngine(options: EngineOptions): Engine {
 		async createWorkflowRun(request) {
 			const { server, commands } = await pickServer(request.server, request.model);
 			const workspace = await checkFolder(request.folder);
-			return createWorkflowRun(randomUUID(), request.workflow, request.task, {
+			const workflow = await prepareWorkflowSkills(request.workflow, request.skills, agentDirOf);
+			return createWorkflowRun(randomUUID(), workflow, request.task, {
 				workspace,
 				exec,
 				// Each agent step is a fresh run: its own context, its own trace.
 				runAgent: async (step, task, signal, onLine) => {
 					const result = await runAgent({
 						agentDir: await agentDirOf(step.agent),
+						skills: step.skills,
 						workspace,
 						task,
 						server: { ...server, model: step.model ?? server.model, temperature: step.temperature ?? server.temperature, extra: { ...server.extra, ...step.extra } },
 						maxSeconds: step.maxSeconds ?? options.maxSeconds,
+						protect: workflow.protect?.map((entry) => fillPlaceholders(entry, { ...workflow.vars, task: request.task })),
 						overrides: { maxTurns: step.maxTurns, tools: step.tools },
 						commands,
 						runsDir,

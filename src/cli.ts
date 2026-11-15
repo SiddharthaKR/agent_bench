@@ -14,7 +14,7 @@ import type { ServerConfig } from "./model.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function parseArgs(argv: string[]): Record<string, string> {
+export function parseArgs(argv: string[]): Record<string, string> {
 	const out: Record<string, string> = {};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i] ?? "";
@@ -59,6 +59,8 @@ async function main(): Promise<number> {
 		onStep: (line) => console.log(line),
 		signal: controller.signal,
 		maxSeconds,
+		protect: args.protect?.split(",").map((entry) => entry.trim()).filter(Boolean),
+		skills: args.skills?.split(",").map((name) => name.trim()).filter(Boolean),
 	});
 
 	console.log("");
@@ -76,7 +78,7 @@ async function main(): Promise<number> {
 	return result.reason === "done" ? 0 : 1;
 }
 
-main().then(
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().then(
 	(code) => process.exit(code),
 	(error) => {
 		console.error((error as Error).message);

@@ -84,6 +84,17 @@ function open(model: ReturnType<typeof fakeModel>, askFirst: boolean, exec: Exec
 const WRITE = "I will create the file.\n@tool write_file\npath: a.v\n---\nmodule a;\nendmodule\n@end";
 
 describe("session", () => {
+	it.each([true, false])("never proposes a protected edit (ask first: %s)", async (askFirst) => {
+		await writeFile(path.join(workspace, "a.v"), "given\n");
+		const model = fakeModel([WRITE, "Done."]);
+		const session = await createSession({ id: "protected", agentDir: path.join(root, "agents", "fpga"), workspace, server: { baseUrl: "http://fake/v1", model: "fake" }, commands: { compile: [], simulate: [] }, runsDir: path.join(root, "runs"), askFirst, protect: ["a.v"], fetchFn: model.fetchFn });
+		const done = idleAfterWork(session);
+		session.send("Work");
+		await done;
+		expect(session.events.some((event) => event.type === "proposal")).toBe(false);
+		expect(model.requests[1]!.messages.at(-1)!.content).toContain("a.v is given and must not be changed.");
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toBe("given\n");
+	});
 	async function configureSubagent() {
 		await writeFile(path.join(root, "agents", "fpga", "agent.json"), JSON.stringify({ name: "FPGA agent", tools: ["read_file"], subagents: ["helper"] }));
 		const dir = path.join(root, "agents", "helper");

@@ -136,6 +136,7 @@ async function withSource(messages: string[], rels: string[], workspace: string)
 }
 
 function compileHint(message: string, line: string, prefix: string): string | undefined {
+	if (/syntax error/i.test(message) && /\d+\s*'s?[dh]\s*-/i.test(line)) return "put the minus sign before the size: -16'sd32768, not 16'sd-32768.";
 	const rules: [RegExp, string][] = [
 		[/is not a valid l-value/i, "only a reg can be assigned in an always block; a wire needs assign."],
 		[/Unable to bind wire\/reg\/memory/i, "this name is not declared in this module."],

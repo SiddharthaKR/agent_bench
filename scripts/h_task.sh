@@ -50,7 +50,7 @@ for ((i=1; i<=runs; i++)); do
 		echo 'Could not prepare the workspace or run folder.' >&2
 	elif mkdir -p "$RUN/agent_bench"; then
 		log="$RUN/agent_bench/agent.log"
-		args=(--server "$server" --folder "$(native "$WS")" --task-file "$(native "$root/tasks/h-$level.md")" --runs "$(native "$RUN/agent_bench")" --max-seconds "$seconds")
+		args=(--server "$server" --folder "$(native "$WS")" --task-file "$(native "$root/tasks/h-$level.md")" --runs "$(native "$RUN/agent_bench")" --max-seconds "$seconds" --protect "tasks/H/gain_spec.md,tasks/H/gain_model.py,tasks/H/fir_spec.md,tasks/H/fir_model.py")
 		[[ -z "$model" ]] || args+=(--model "$model")
 		echo '=== agent'
 		npx tsx src/cli.ts "${args[@]}" 2>&1 | tee "$log"

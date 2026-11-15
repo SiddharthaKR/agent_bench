@@ -33,8 +33,10 @@ function names(text: string): string[] {
 export function lintVerilog(text: string): string[] {
 	const clean = text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, " ");
 	const hints: string[] = [];
+	const arithmetic: string[] = [];
 	for (const module of clean.matchAll(/\bmodule\b([\s\S]*?)\bendmodule\b/g)) {
 		const source = module[1] ?? "";
+		arithmetic.push(...unsignedLimits(source));
 		const headerEnd = source.indexOf(";");
 		if (headerEnd < 0) continue;
 		const header = source.slice(0, headerEnd);
@@ -119,5 +121,44 @@ export function lintVerilog(text: string): string[] {
 			if (hints.length === 3) return hints;
 		}
 	}
-	return hints;
+	return [...hints, ...arithmetic].slice(0, 3);
+}
+
+function unsignedLimits(source: string): string[] {
+	const signed = new Set<string>();
+	for (const declaration of source.matchAll(/\b(?:input|output|inout|wire|reg)\s+(?:(?:wire|reg)\s+)?signed\s*(?:\[[^\]]*\]\s*)?([\w$]+(?:\s*,\s*[\w$]+)*)/g)) {
+		for (const name of declaration[1]!.split(/\s*,\s*/)) signed.add(name);
+	}
+	const limits = new Set<string>();
+	for (const declaration of source.matchAll(/\b(?:localparam|parameter)\b([^;)]*)/g)) {
+		const parts = commaParts(declaration[1]!);
+		const prefix = parts[0]?.split("=")[0] ?? "";
+		if (/\bsigned\b/.test(prefix)) continue;
+		for (const part of parts) {
+			const match = /([a-zA-Z_][\w$]*)\s*=\s*(.*)/.exec(part);
+			if (match && (/\[[^\]]*\]/.test(prefix) || /^\d+\s*'[bodh]/i.test(match[2]!))) limits.add(match[1]!);
+		}
+	}
+	const conditions: string[] = [];
+	for (const match of source.matchAll(/\bif\s*\(/g)) {
+		const start = match.index + match[0].lastIndexOf("(");
+		const end = closing(source, start);
+		if (end >= 0) conditions.push(source.slice(start + 1, end));
+	}
+	for (const match of source.matchAll(/([^;?:]+)\?/g)) conditions.push(match[1]!);
+	const found = new Set<string>();
+	for (let condition of conditions) {
+		let prior: string;
+		do {
+			prior = condition;
+			condition = condition.replace(/(?<![\w$])\(\s*([a-zA-Z_][\w$]*)\s*\)/g, "$1");
+		} while (condition !== prior);
+		for (const match of condition.matchAll(/(?:^|[=(]|&&|\|\|)\s*([a-zA-Z_][\w$]*)\s*(<=|>=|<(?![<=])|>(?![>=]))\s*([a-zA-Z_][\w$]*)\s*(?=$|[)]|&&|\|\|)/g)) {
+			const left = match[1]!;
+			const right = match[3]!;
+			if (limits.has(left) && signed.has(right)) found.add(left);
+			if (limits.has(right) && signed.has(left)) found.add(right);
+		}
+	}
+	return [...found].map((name) => `Hint: ${name} is unsigned, so the comparison with it is unsigned and wrong for negative values. Declare it as localparam signed [..] ${name}.`);
 }

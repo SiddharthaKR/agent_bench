@@ -1,6 +1,16 @@
 import { expect, it } from "vitest";
 import { simHints } from "../src/tools/sim_hints.ts";
 
+it("explains a repeated saturation value with differing wanted values", () => {
+	expect(simHints(["FAIL a got 32767 wanted 1", "FAIL b got 32767 wanted -2", "FAIL c got 32767 wanted 3"])).toEqual(["Hint: every result is 32767. If that is a saturation limit, the comparison is probably unsigned or the limits are swapped; declare limits and compared values signed."]);
+	for (const value of ["x", "z"]) expect(simHints([1, 2, 3].map((n) => `FAIL a got ${value} wanted ${n}`)).join("\n")).not.toContain("every result");
+	expect(simHints([1, 2, 3].map(() => "FAIL a got 32767 wanted 1"))).toEqual([]);
+});
+it("recognizes hexadecimal constants and counts failing lines only", () => {
+	expect(simHints([1, 2, 3].map((n) => `FAIL a got 0x7fff wanted ${n}`)).join("\n")).toContain("every result is 0x7fff");
+	expect(simHints(["FAIL a got 99 wanted 1", "PASS b got 99 wanted 2", "PASS c got 99 wanted 3"])).toEqual([]);
+});
+
 it("recognizes the real late output and unknown value", () => {
 	const hints = simHints(["FAIL unity got x wanted 160", "FAIL times_two got 160 wanted 200", "FAIL negative got 200 wanted -200", "FAIL saturate_neg got 32767 wanted -32768", "FAIL truncate got 32767 wanted 3"]);
 	expect(hints).toHaveLength(2);

@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 
 const required = ["--workflow", "flow.json", "--folder", "project", "--task", "Build it"];
+it("parses protected paths", () => {
+	expect(parseWorkflowArgs([...required, "--protect", "tb/a.v, spec.md"]).protect).toEqual(["tb/a.v", "spec.md"]);
+});
 it("parses required arguments and defaults", () => {
 	expect(parseWorkflowArgs(required)).toEqual({ workflow: "flow.json", folder: "project", task: "Build it", server: "local", noPause: false, vars: {} });
 });

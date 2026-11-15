@@ -39,6 +39,20 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe("sub-agents", () => {
+	it("returns protection advice before the small-file edit policy", async () => {
+		await agent("main", { name: "Main", tools: ["replace_lines"] });
+		const fake = model(["@tool replace_lines\npath: spec.md\nfrom: 1\nto: 1\n---\nchanged\n@end", "Done."]);
+		await runAgent({ ...options, protect: ["spec.md"], fetchFn: fake.fetchFn });
+		expect(fake.requests[1]!.messages.at(-1)!.content).toContain("spec.md is given and must not be changed.");
+		expect(await readFile(path.join(options.workspace, "spec.md"), "utf8")).toBe("The specification.");
+	});
+	it("inherits protected paths in the child", async () => {
+		await agent("helper", { name: "Helpful agent", tools: ["write_file"] });
+		const fake = model(["@tool ask_agent\nagent: helper\n---\nCheck\n@end", "@tool write_file\npath: spec.md\n---\nchanged\n@end", "Blocked.", "Done."]);
+		await runAgent({ ...options, protect: ["spec.md"], fetchFn: fake.fetchFn });
+		expect(fake.requests[2]!.messages.at(-1)!.content).toContain("spec.md is given and must not be changed.");
+		expect(await readFile(path.join(options.workspace, "spec.md"), "utf8")).toBe("The specification.");
+	});
 	it("does not start a model request when already aborted during setup", async () => {
 		const fake = model(["Done."]);
 		const controller = new AbortController();

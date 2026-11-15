@@ -59,7 +59,8 @@ Linux is the target. Development happens on the Windows PC; the office server (1
 | 2 | Work screen: files, editor with autosave and Ctrl+S, change review, chat with stop and steer | Built, checked in the browser with local Gemma |
 | 3 | Workflows screen: step cards, graph, run controls | Built, checked in the browser |
 | 4 | Trace screen | Built, checked in the browser |
-| 5 | Agents screen; DPU and GPU agents; MCP servers | Screen and agents built and checked; **MCP in progress** |
+| 5 | Agents screen; DPU and GPU agents; MCP servers | Screen and agents built and checked; MCP built, tests pass, card not checked in the browser |
+| 7 | FPGA accuracy and speed (owner's top priority) | In progress: see the accuracy section |
 | 6 | Results (Lab), medium task, server development mode | Built; scripts not yet run end to end since the rewrite |
 
 ## What exists (branch `ui-work-workflows`)
@@ -84,9 +85,28 @@ Task: write a saturating gain block and make a given testbench pass. Verdict fro
 | 2026-11-15 | After the accuracy work, thinking on, 300 s | 2 of 3 |
 | 2026-11-15 | Same plus sub-agents and the fixed-point skill line, thinking on | 1 of 3 |
 | 2026-11-15 | Same, thinking off (`local-fast`) | 2 of 4 |
-| 2026-11-15 | Retry workflow, up to 3 fresh attempts, 150 s each | Running when this was written |
+| 2026-11-15 | Retry workflow, 150 s (the retries never ran: the first time-out ended the run) | 1 of 4 |
+| 2026-11-15 | Latency rule only, thinking off, 120 s | 1 of 4 |
+| 2026-11-15 | Latency rule only, thinking on, 150 s | 2 of 4 |
+| 2026-11-15 | Commit 44c15ea, single agent, thinking off, 120 s | 3 of 4 (fastest pass 30 s) |
+| 2026-11-15 | Commit 44c15ea, `fpga-fast` workflow | **4 of 4** (16, 18, 20 and 211 s) |
 
-What changed the result:
+Two more local tasks since commit 44c15ea, `fpga-fast` workflow:
+
+| Task | Level | Passed | Time per run |
+|---|---|---|---|
+| `counter` (up/down counter with load and wrap flag) | easy | 3 of 3 | 14, 18, 50 s |
+| `fir4` (4-tap FIR, Q7 coefficients, saturation, valid) | medium | 2 of 3 | 63, 203 s; the failure used all three attempts (394 s) |
+
+What the traces of failed runs showed, and the fix for each (all 2026-11-15):
+- Retries never happened after a time-out. Fixed: time limit per agent step; a stopped step goes on to the checks.
+- Intermediate values registered, so the output was late. Fixed: latency rule, worked module in the fixed-point skill, "late output" hint.
+- A shadow register (`dout_reg`) assigned instead of the output port, every test `x`. Fixed: lint hint naming the undriven output.
+- Rounding added although the spec said truncate (copied from the old skill example). Fixed: the example truncates.
+- The given testbench overwritten by the model. Fixed in the prompt; a harness refusal ("protected files") is being built.
+- FIR: `16'sd-32768` (syntax), limits declared unsigned so every result saturated. Rule added; hints being built.
+
+What changed the result earlier:
 - Files under 150 lines are rewritten whole (before, stale line-range edits grew a file to 225 broken lines).
 - Context stays between 1.5k and 6.3k tokens (before, 15k to 28k).
 - The same failing result three times tells the model to re-read and rewrite.
@@ -98,9 +118,14 @@ All numbers are for E4B. The real target, Gemma 4 26B on the server, has not bee
 
 ## Next steps
 
-- [ ] Read the retry-workflow score; decide the default (single run or retry workflow) for easy tasks.
-- [ ] Check Codex task K (MCP servers), run all tests, look at the Agents screen's MCP card, commit.
-- [ ] Run `scripts/h_task.sh` for easy on this PC to confirm the rewrite works end to end.
+Priority set by the owner on 2026-11-15: **accuracy and speed of FPGA work first**; MCP and other extras are low priority.
+
+- [x] Retry-workflow score read (1 of 4, retries were broken); fixed and re-measured (4 of 4 on gain with `fpga-fast`).
+- [x] MCP servers (Codex task K) committed; tests pass. Its card on the Agents screen is not yet checked in the browser (low priority).
+- [ ] Codex tasks P and O: protected files, three more hints, topic skills ported from the old harness, skill preloading (`--skills`, step `skills`). Verify, commit.
+- [ ] Score again on gain, counter and fir4 after P; aim: easy tasks pass every run in under a minute, fir4 passes 3 of 3.
+- [ ] Comparisons, change a default only where the numbers are better: comments (current, header only, none); short skills against the ported descriptive topic skills; `plan-first`.
+- [ ] Run `scripts/h_task.sh` for easy and medium on this PC to confirm the scripts work end to end.
 - [ ] Try the sub-agents and the code-API examples against the real model.
 - [ ] Owner: look at the screens at desktop size and say what to change in the look.
 - [ ] Owner: on the server, follow `docs/server.md`, then run `bash scripts/h_task.sh /path/to/ai_demo easy office <model id> -n 3` and the same with `medium`.

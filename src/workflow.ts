@@ -1,9 +1,29 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentStep, CommandStep, Workflow, WorkflowEvent, WorkflowRunState } from "./shared/api.ts";
 import type { WorkflowRun } from "./shared/engine.ts";
 import type { Exec } from "./types.ts";
 import { simHints } from "./tools/sim_hints.ts";
+import { loadSkills, validateSkillNames } from "./skills.ts";
+
+/** Validate all selections before any step runs, and apply run-wide additions. */
+export async function prepareWorkflowSkills(workflow: Workflow, names: string[] | undefined, agentDirOf: (id: string) => Promise<string>): Promise<Workflow> {
+	const prepared = structuredClone(workflow);
+	for (const step of prepared.steps) {
+		if (step.type !== "agent") continue;
+		if (names?.length) {
+			const first = step.skills;
+			step.skills = [...new Set([...(first ?? []), ...names])];
+			if (step.retry) step.retry.skills = [...new Set([...(step.retry.skills ?? first ?? []), ...names])];
+		}
+		const selected = [...(step.skills ?? []), ...(step.retry?.skills ?? [])];
+		if (!selected.length) continue;
+		const dir = await agentDirOf(step.agent);
+		const agent = JSON.parse(await readFile(join(dir, "agent.json"), "utf8")) as { name: string; skills?: string[] };
+		validateSkillNames(await loadSkills(dir), selected, agent.name);
+	}
+	return prepared;
+}
 
 export interface WorkflowDeps {
 	/** Absolute project folder used by commands. */

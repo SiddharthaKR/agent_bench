@@ -6,7 +6,7 @@ import { loadConfig } from "./config.ts";
 import type { Workflow, WorkflowEvent, WorkflowRunState } from "./shared/api.ts";
 import { realExec } from "./tools/index.ts";
 import type { Exec } from "./types.ts";
-import { createWorkflowRun } from "./workflow.ts";
+import { createWorkflowRun, fillPlaceholders, prepareWorkflowSkills } from "./workflow.ts";
 
 export { runAgent, loadAgent } from "./agent.ts";
 export type { AgentFile, LoadAgentOptions, RunOptions, RunResult, EndReason } from "./agent.ts";
@@ -31,6 +31,8 @@ export type * from "./shared/api.ts";
 export type * from "./shared/engine.ts";
 
 export interface RunWorkflowOptions {
+	protect?: string[];
+	skills?: string[];
 	root: string;
 	workflow: Workflow | string;
 	folder: string;
@@ -52,10 +54,15 @@ export async function prepareWorkflowRun(options: RunWorkflowOptions) {
 	const serverId = options.server ?? "local";
 	const server = config.servers[serverId];
 	if (!server) throw new Error(`No model server named "${serverId}" in config.json.`);
-	const workflow = typeof options.workflow === "string"
+	let workflow = typeof options.workflow === "string"
 		? JSON.parse(await readFile(options.workflow, "utf8")) as Workflow
 		: structuredClone(options.workflow);
+	workflow = await prepareWorkflowSkills(workflow, options.skills, async (id) => {
+		if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("Invalid agent name.");
+		return path.join(root, "agents", id);
+	});
 	workflow.vars = { ...workflow.vars, ...options.vars };
+	workflow.protect = [...(workflow.protect ?? []), ...(options.protect ?? [])];
 	const workspace = path.resolve(options.folder);
 	const exec = options.exec ?? realExec;
 	const run = createWorkflowRun(randomUUID(), workflow, options.task, {
@@ -67,7 +74,8 @@ export async function prepareWorkflowRun(options: RunWorkflowOptions) {
 				agentDir: path.join(root, "agents", step.agent), workspace, task,
 				server: { ...server, model: step.model ?? options.model ?? server.model, temperature: step.temperature ?? server.temperature, extra: { ...server.extra, ...step.extra } },
 				commands: config.commands, runsDir: path.join(root, "runs"), exec,
-				signal, onStep: onLine, maxSeconds: step.maxSeconds ?? options.maxSeconds, fetchFn: options.fetchFn,
+				skills: step.skills, signal, onStep: onLine, maxSeconds: step.maxSeconds ?? options.maxSeconds, fetchFn: options.fetchFn,
+				protect: workflow.protect?.map((entry) => fillPlaceholders(entry, { ...workflow.vars, task: options.task })),
 				overrides: { maxTurns: step.maxTurns, tools: step.tools },
 			});
 			if (result.finalText) onLine(result.finalText);

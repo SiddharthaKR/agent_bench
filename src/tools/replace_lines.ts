@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import type { ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { isNotFound, joinLines, lineNumber, numbered, splitLines } from "./util.ts";
+import { protectedRefusal } from "./edit_policy.ts";
 
 const CONTEXT = 2;
 const ECHO_CAP = 40;
@@ -18,6 +19,8 @@ export const replaceLines: ToolSpec = {
 	async run(args, ctx) {
 		const p = resolveInWorkspace(ctx.workspace, String(args.path ?? ""));
 		if (!p.ok) return { ok: false, text: p.text };
+		const refusal = protectedRefusal("replace_lines", args, ctx);
+		if (refusal) return { ok: false, text: refusal };
 		if (args.from === undefined) return { ok: false, text: "replace_lines needs from." };
 		if (args.to === undefined) return { ok: false, text: "replace_lines needs to." };
 		const f = lineNumber(args.from, "from");

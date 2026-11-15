@@ -37,6 +37,12 @@ export async function loadSkills(agentDir: string, enabled?: string[]): Promise<
 	return skills;
 }
 
+export function validateSkillNames(skills: Skill[], names: string[], agent: string): void {
+	for (const name of names) {
+		if (!skills.some((skill) => skill.name === name)) throw new Error(`Unknown skill "${name}" for agent "${agent}".`);
+	}
+}
+
 export function skillTool(skills: Skill[]): ToolSpec {
 	return {
 		name: "use_skill",

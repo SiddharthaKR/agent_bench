@@ -86,6 +86,7 @@ export type SessionEvent =
 	| { type: "usage"; modelCalls: number; contextTokens: number; outputTokens: number };
 
 export interface CreateSessionRequest {
+	protect?: string[];
 	agent: string;
 	folder: string;
 	server: string;
@@ -118,6 +119,8 @@ interface StepBase {
 
 /** The model works on a task with a fresh context. */
 export interface AgentStep extends StepBase {
+	/** Skills preloaded into this step's system prompt. */
+	skills?: string[];
 	type: "agent";
 	/** Folder name under agents/. */
 	agent: string;
@@ -133,7 +136,7 @@ export interface AgentStep extends StepBase {
 	/** Extra request fields for this step, merged over the server's own `extra`. */
 	extra?: Record<string, unknown>;
 	/** Settings used instead when this step runs again after a failed check. */
-	retry?: { model?: string; temperature?: number; maxTurns?: number; maxSeconds?: number; extra?: Record<string, unknown> };
+	retry?: { skills?: string[]; model?: string; temperature?: number; maxTurns?: number; maxSeconds?: number; extra?: Record<string, unknown> };
 	/** Tool names this step may use; a subset of the agent's tools. */
 	tools?: string[];
 }
@@ -149,6 +152,7 @@ export interface CommandStep extends StepBase {
 export type WorkflowStep = AgentStep | CommandStep;
 
 export interface Workflow {
+	protect?: string[];
 	id: string;
 	name: string;
 	/** Default task text shown in the run box. */
@@ -188,6 +192,8 @@ export type WorkflowEvent =
 	| { type: "line"; stepId: string; text: string };
 
 export interface RunWorkflowRequest {
+	/** Skills added to every agent step, including retries. */
+	skills?: string[];
 	/** The workflow as currently edited in the browser. */
 	workflow: Workflow;
 	folder: string;

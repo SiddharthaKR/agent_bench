@@ -4,6 +4,8 @@ import { createInterface } from "node:readline";
 import { prepareWorkflowRun } from "./index.ts";
 
 export interface WorkflowArgs {
+	protect?: string[];
+	skills?: string[];
 	workflow: string;
 	folder: string;
 	task: string;
@@ -21,7 +23,7 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 	for (let i = 0; i < argv.length; i++) {
 		const key = argv[i]!;
 		if (key === "--no-pause") { noPause = true; continue; }
-		if (!["--workflow", "--folder", "--task", "--server", "--model", "--var", "--max-seconds"].includes(key)) throw new Error(`Unknown option ${key}.`);
+		if (!["--workflow", "--folder", "--task", "--server", "--model", "--var", "--max-seconds", "--skills", "--protect"].includes(key)) throw new Error(`Unknown option ${key}.`);
 		const value = argv[++i];
 		if (value === undefined || value.startsWith("--")) throw new Error(`Option ${key} needs a value.`);
 		if (key === "--var") {
@@ -33,12 +35,12 @@ export function parseWorkflowArgs(argv: string[]): WorkflowArgs {
 	for (const key of ["workflow", "folder", "task"]) if (!values[key]) throw new Error(`Give --${key}.`);
 	const maxSeconds = values["max-seconds"] === undefined ? undefined : Number(values["max-seconds"]);
 	if (maxSeconds !== undefined && (!Number.isFinite(maxSeconds) || maxSeconds <= 0)) throw new Error("--max-seconds must be a positive number.");
-	return { workflow: values.workflow!, folder: values.folder!, task: values.task!, server: values.server ?? "local", model: values.model, maxSeconds, noPause, vars };
+	return { workflow: values.workflow!, folder: values.folder!, task: values.task!, server: values.server ?? "local", model: values.model, skills: values.skills?.split(",").map((name) => name.trim()).filter(Boolean), maxSeconds, noPause, vars, ...(values.protect === undefined ? {} : { protect: values.protect.split(",").map((entry) => entry.trim()).filter(Boolean) }) };
 }
 
 export async function workflowMain(argv: string[]): Promise<number> {
 	if (argv.includes("--help")) {
-		console.log("Usage: workflow --workflow file.json --folder path --task text [--server name] [--model name] [--var name=value] [--no-pause] [--max-seconds seconds]\n--max-seconds limits each agent step, not the whole workflow.");
+		console.log("Usage: workflow --workflow file.json --folder path --task text [--server name] [--model name] [--var name=value] [--no-pause] [--max-seconds seconds] [--skills a,b] [--protect a,b]\n--max-seconds limits each agent step, not the whole workflow.");
 		return 0;
 	}
 	const args = parseWorkflowArgs(argv);

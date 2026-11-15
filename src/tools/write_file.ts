@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { joinLines, splitLines } from "./util.ts";
+import { protectedRefusal } from "./edit_policy.ts";
 
 export const writeFile: ToolSpec = {
 	name: "write_file",
@@ -12,6 +13,8 @@ export const writeFile: ToolSpec = {
 	async run(args, ctx) {
 		const p = resolveInWorkspace(ctx.workspace, String(args.path ?? ""));
 		if (!p.ok) return { ok: false, text: p.text };
+		const refusal = protectedRefusal("write_file", args, ctx);
+		if (refusal) return { ok: false, text: refusal };
 		if (typeof args.content !== "string") {
 			return { ok: false, text: "write_file needs the file contents after a --- line." };
 		}

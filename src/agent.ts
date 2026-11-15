@@ -10,10 +10,11 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { LoopGuard } from "./guard.ts";
 import { trimContext } from "./context.ts";
-import { loadSkills, skillTool } from "./skills.ts";
+import { loadSkills, skillTool, validateSkillNames } from "./skills.ts";
 import { createSubagentRunner, subagentTool } from "./subagent.ts";
 import type { SubagentRunner } from "./subagent.ts";
-import { smallFileRefusal } from "./tools/edit_policy.ts";
+import type { ProtectedContext } from "./tools/edit_policy.ts";
+import { protectedRefusal, smallFileRefusal } from "./tools/edit_policy.ts";
 import type { ServerConfig } from "./model.ts";
 import { createStreamFn, makeModel } from "./model.ts";
 import { INVALID_CALL, renderToolHelp } from "./protocol.ts";
@@ -36,6 +37,9 @@ export interface AgentFile {
 }
 
 export interface RunOptions {
+	protect?: string[];
+	/** Names of this agent's skills to include in the system prompt. */
+	skills?: string[];
 	/** Folder holding agent.json and prompt.md. */
 	agentDir: string;
 	/** Project folder the agent works in. */
@@ -56,6 +60,7 @@ export interface RunOptions {
 }
 
 export interface LoadAgentOptions {
+	skills?: string[];
 	depth?: number;
 	overrides?: RunOptions["overrides"];
 	runSubagent?: SubagentRunner;
@@ -135,13 +140,17 @@ export async function loadAgent(agentDir: string, options: LoadAgentOptions = {}
 		if (!agentFile.tools.includes(name)) throw new Error(`Tool "${name}" is not available to agent "${agentFile.name}".`);
 	}
 	const specs = pickTools(selected ?? agentFile.tools);
-	const skills = await loadSkills(agentDir, agentFile.skills);
-	const optional = skills.filter((skill) => !skill.always);
+	// The agent's skills list decides what is always on or offered; a run may preload any skill in the folder.
+	const allSkills = await loadSkills(agentDir);
+	validateSkillNames(allSkills, options.skills ?? [], agentFile.name);
+	const preloaded = new Set(options.skills);
+	const skills = allSkills.filter((skill) => preloaded.has(skill.name) || !agentFile.skills || agentFile.skills.includes(skill.name));
+	const optional = skills.filter((skill) => !skill.always && !preloaded.has(skill.name));
 	if (optional.length && selected === undefined) specs.push(skillTool(optional));
 	if (agentFile.subagents?.length && (options.depth ?? 0) === 0 && selected === undefined) {
 		specs.push(await subagentTool(agentDir, agentFile.subagents, options.runSubagent));
 	}
-	const always = skills.filter((skill) => skill.always).map((skill) => `## ${skill.name}\n${skill.text}`);
+	const always = skills.filter((skill) => skill.always || preloaded.has(skill.name)).map((skill) => `## ${skill.name}\n${skill.text}`);
 	const listing = optional.length && selected === undefined ? `\n\nSkills you can load with use_skill:\n${optional.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n")}` : "";
 	return { agentFile, specs, systemPrompt: [prompt, ...always, renderToolHelp(specs)].join("\n\n") + listing };
 }
@@ -151,6 +160,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 	let runSubagent: SubagentRunner;
 	let { agentFile, specs, systemPrompt } = await loadAgent(options.agentDir, {
 		depth: options.depth,
+		skills: options.skills,
 		overrides: options.overrides,
 		runSubagent: (...args) => runSubagent(...args),
 	});
@@ -164,11 +174,11 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
 		const trace = createTrace(options.runsDir, path.basename(options.agentDir));
 		for (const text of mcp?.problems ?? []) trace.write({ type: "note", text });
-		const ctx: ToolContext = { workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
+		const ctx: ProtectedContext = { protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
 		const guard = new LoopGuard({ maxCalls: options.overrides?.maxTurns ?? agentFile.maxTurns ?? 40 });
 		const seconds = options.maxSeconds ?? agentFile.maxSeconds;
 		const remainingSeconds = () => seconds === undefined ? undefined : Math.max(0, seconds - (Date.now() - started) / 1000);
-		runSubagent = createSubagentRunner(options, trace, remainingSeconds);
+		runSubagent = createSubagentRunner({ ...options, skills: undefined }, trace, remainingSeconds);
 
 		let stoppedBy: EndReason | undefined;
 		let modelCalls = 0;
@@ -210,7 +220,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 				const verdict = guard.check({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> });
 				if (verdict.allow) {
 					if (mcpNames.has(toolCall.name)) return undefined;
-					const refusal = await smallFileRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx.workspace, agentFile.smallFileLines);
+					const refusal = protectedRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx) ?? await smallFileRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx.workspace, agentFile.smallFileLines);
 					return refusal ? { block: true, reason: refusal } : undefined;
 				}
 				trace.write({ type: "guard", tool: toolCall.name, reason: verdict.reason, stop: verdict.stop });

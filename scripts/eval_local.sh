@@ -9,7 +9,8 @@ model=""
 workflow=""
 seconds=300
 suite=gain
-while getopts ':n:s:m:w:t:e:' opt; do
+skills=""
+while getopts ':n:s:m:w:t:e:k:' opt; do
 	case "$opt" in
 		n) runs="$OPTARG" ;;
 		s) server="$OPTARG" ;;
@@ -17,7 +18,8 @@ while getopts ':n:s:m:w:t:e:' opt; do
 		w) workflow="$OPTARG" ;;
 		t) seconds="$OPTARG" ;;
 		e) suite="$OPTARG" ;;
-		*) echo 'Usage: eval_local.sh [-n runs] [-s server] [-m model] [-w workflow.json] [-t seconds] [-e name]' >&2; exit 2 ;;
+		k) skills="$OPTARG" ;;
+		*) echo 'Usage: eval_local.sh [-n runs] [-s server] [-m model] [-w workflow.json] [-t seconds] [-e name] [-k a,b]' >&2; exit 2 ;;
 	esac
 done
 [[ "$suite" =~ ^[A-Za-z0-9_-]+$ && -f "evals/$suite/eval.json" ]] || { echo 'Unknown eval.' >&2; exit 2; }
@@ -39,6 +41,7 @@ record_model="$model"
 [[ -n "$record_model" ]] || record_model="$(configured_model)" || record_model=unknown
 setup=agent
 [[ -z "$workflow" ]] || setup="workflow $(basename "${workflow%.json}")"
+[[ -z "$skills" ]] || setup+=" +$skills"
 total_start=$SECONDS
 passed=0
 temp=""
@@ -47,8 +50,9 @@ for ((i=1; i<=runs; i++)); do
 	temp="$(mktemp -d)" || exit 2
 	cp -R "evals/$suite/." "$temp/" || exit 2
 	start=$SECONDS
-	args=(--folder "$(native "$temp")" --server "$server" --max-seconds "$seconds")
+	args=(--folder "$(native "$temp")" --server "$server" --max-seconds "$seconds" --protect "$tb,spec.md")
 	[[ -z "$model" ]] || args+=(--model "$model")
+	[[ -z "$skills" ]] || args+=(--skills "$skills")
 	if [[ -n "$workflow" ]]; then
 		npx tsx src/cli-workflow.ts --workflow "$(native "$workflow")" --task "$(cat "evals/$suite/task.md")" --no-pause --var "design=$design" --var "tb=$tb" "${args[@]}" >"$temp/agent.log" 2>&1
 	else

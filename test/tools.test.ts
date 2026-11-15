@@ -59,6 +59,11 @@ const get = (rel: string) => fs.readFile(path.join(ws, rel), "utf8");
 const numbers = (n: number) => Array.from({ length: n }, (_, i) => `line${i + 1}`).join("\n") + "\n";
 
 describe("compile hints", () => {
+	it.each(["16'sd-32768", "16'd-2", "16'sh-8000", "16'h-2"])("explains negative sized literal %s", async (literal) => {
+		await put("a.v", `module a;\nlocalparam X = ${literal};\nendmodule`);
+		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:2: syntax error" })]);
+		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("Hint: put the minus sign before the size: -16'sd32768, not 16'sd-32768.");
+	});
 	it.each(["localparam X = 1;", "parameter X = 1;", "integer x;", "genvar x;"])("explains a block declaration: %s", async (declaration) => {
 		await put("a.v", `module a;\nalways @* begin\n  ${declaration}\nend\nendmodule`);
 		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:3: syntax error" })]);
@@ -160,6 +165,22 @@ describe("read_file", () => {
 });
 
 describe("write_file", () => {
+	it.each([writeFile, replaceLines])("protects files and folders with $name", async (tool) => {
+		await fs.mkdir(path.join(ws, "tb"));
+		await put("tb/tb_gain.v", "given\n");
+		await put("spec.md", "given\n");
+		const ctx = { ...plainCtx(), protect: ["tb/", "spec.md"] };
+		for (const name of ["tb/tb_gain.v", "rtl/../tb/tb_gain.v", "tb\\tb_gain.v", ...(process.platform === "win32" ? ["TB/TB_GAIN.V"] : [])]) {
+			const r = await tool.run({ path: name, from: 1, to: 1, content: "changed" }, ctx);
+			expect(r.ok).toBe(false);
+			expect(r.text).toMatch(/ is given and must not be changed\. Fix the design instead, and run run_sim with this file\.$/);
+		}
+		expect(await tool.run({ path: "spec.md", from: 1, to: 1, content: "changed" }, ctx)).toEqual({ ok: false, text: "spec.md is given and must not be changed." });
+		expect(await get("tb/tb_gain.v")).toBe("given\n");
+		expect(await get("spec.md")).toBe("given\n");
+		await put("free.v", "old\n");
+		expect((await tool.run({ path: "free.v", from: 1, to: 1, content: "changed" }, ctx)).ok).toBe(true);
+	});
 	it("creates a file with parent folders", async () => {
 		const r = await writeFile.run({ path: "rtl/deep/a.v", content: "a\nb\n" }, plainCtx());
 		expect(r).toEqual({ ok: true, text: "Created rtl/deep/a.v, 2 lines." });

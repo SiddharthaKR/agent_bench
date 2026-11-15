@@ -1,9 +1,39 @@
 import { describe, expect, it } from "vitest";
 import { lintVerilog } from "../src/tools/lint.ts";
+import { readFile } from "node:fs/promises";
 
 const undriven = "Hint: output dout is never assigned, so it reads x. Assign dout itself.";
 
 describe("lintVerilog", () => {
+	it.each(["counter/counter.v", "fir4/fir4.v", "gain/gain.v"])("gives no hints for reference %s", async (file) => {
+		expect(lintVerilog(await readFile(new URL(`../evals-ref/${file}`, import.meta.url), "utf8"))).toEqual([]);
+	});
+	it("explains unsigned saturation limits", () => {
+		const source = `module m(input clk, output reg signed [15:0] dout);
+		localparam [15:0] MAX_16 = 16'd32767;
+		localparam [15:0] MIN_16 = 16'h8000;
+		wire signed [31:0] shifted_val;
+		always @(posedge clk) begin
+			if (shifted_val > MAX_16) dout <= MAX_16;
+			else if (shifted_val < MIN_16) dout <= MIN_16;
+			else dout <= shifted_val[15:0];
+		end endmodule`;
+		expect(lintVerilog(source)).toEqual(["MAX_16", "MIN_16"].map((name) => `Hint: ${name} is unsigned, so the comparison with it is unsigned and wrong for negative values. Declare it as localparam signed [..] ${name}.`));
+		expect(lintVerilog(source.replace("wire signed", "wire"))).toEqual([]);
+		expect(lintVerilog(source.replaceAll("localparam [", "localparam signed ["))).toEqual([]);
+	});
+	it.each(["x > LIMIT", "LIMIT <= x", "x >= LIMIT", "x < LIMIT"])("checks ternary condition %s", (condition) => {
+		expect(lintVerilog(`module m(input signed [15:0] x, output y); parameter LIMIT = 16'h8000; assign y = ${condition} ? 1 : 0; endmodule`)[0]).toContain("LIMIT is unsigned");
+	});
+	it("ignores assignments and uncertain operands", () => {
+		expect(lintVerilog("module m(output reg y); parameter [15:0] LIMIT=2; always @* begin y <= LIMIT; if (unknown > LIMIT) y=0; end endmodule")).toEqual([]);
+	});
+	it("accepts parenthesized operands and skips compound operands with unknown signedness", () => {
+		const source = (condition: string) => `module m(input signed [15:0] x, output y); parameter [15:0] LIMIT=2; assign y = ${condition} ? 1 : 0; endmodule`;
+		expect(lintVerilog(source("(x) > (LIMIT)"))).toHaveLength(1);
+		expect(lintVerilog(source("x > LIMIT + unknown"))).toEqual([]);
+		expect(lintVerilog(source("unknown + x > LIMIT"))).toEqual([]);
+	});
 	it("names the shadow register in a parameterized ANSI module", () => {
 		expect(lintVerilog(`module gain #(parameter W = 16) (
 			input wire clk, input wire rst, input wire signed [W-1:0] din,

@@ -11,7 +11,8 @@ import { invalidTool, loadAgent, toAgentTool } from "./agent.ts";
 import { lineDiff } from "./diff.ts";
 import { LoopGuard } from "./guard.ts";
 import { trimContext } from "./context.ts";
-import { smallFileRefusal } from "./tools/edit_policy.ts";
+import type { ProtectedContext } from "./tools/edit_policy.ts";
+import { protectedRefusal, smallFileRefusal } from "./tools/edit_policy.ts";
 import type { ServerConfig } from "./model.ts";
 import { createStreamFn, makeModel } from "./model.ts";
 import { INVALID_CALL, renderCall, renderToolHelp } from "./protocol.ts";
@@ -25,6 +26,7 @@ import type { SubagentRunner } from "./subagent.ts";
 import type { CommandConfig, Exec, ToolContext } from "./types.ts";
 
 export interface SessionOptions {
+	protect?: string[];
 	id: string;
 	agentDir: string;
 	workspace: string;
@@ -93,7 +95,7 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 			systemPrompt = systemPrompt.replace(renderToolHelp(specs), () => renderToolHelp([...specs, ...mcp.tools]));
 			specs.push(...mcp.tools);
 		}
-		const ctx: ToolContext = { workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
+		const ctx: ProtectedContext = { protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
 		const trace = createTrace(options.runsDir, `${path.basename(options.agentDir)}-session`);
 		trace.write({ type: "run_start", agent: agentFile.name, model: options.server.model, workspace: ctx.workspace, promptChars: systemPrompt.length, systemPrompt });
 
@@ -170,7 +172,7 @@ export async function createSession(options: SessionOptions): Promise<Session> {
 					return { block: true, reason: verdict.reason, terminate: verdict.stop };
 				}
 				if (mcpNames.has(toolCall.name)) return undefined;
-				const refusal = await smallFileRefusal(toolCall.name, typed, ctx.workspace, agentFile.smallFileLines);
+				const refusal = protectedRefusal(toolCall.name, typed, ctx) ?? await smallFileRefusal(toolCall.name, typed, ctx.workspace, agentFile.smallFileLines);
 				if (refusal) {
 					refused.set(toolCall.id, "blocked");
 					return { block: true, reason: refusal };
