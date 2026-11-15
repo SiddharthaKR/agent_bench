@@ -17,7 +17,7 @@ import { loadSkills, skillTool, validateSkillNames } from "./skills.ts";
 import { createSubagentRunner, subagentTool } from "./subagent.ts";
 import type { SubagentRunner } from "./subagent.ts";
 import type { ProtectedContext } from "./tools/edit_policy.ts";
-import { protectedRefusal, smallFileRefusal } from "./tools/edit_policy.ts";
+import { NO_TESTBENCH, taskWantsTestbench, protectedRefusal, smallFileRefusal } from "./tools/edit_policy.ts";
 import type { ServerConfig } from "./model.ts";
 import { createStreamFn, makeModel } from "./model.ts";
 import { INVALID_CALL, renderToolHelp } from "./protocol.ts";
@@ -99,7 +99,7 @@ export interface RunResult {
 
 const INVALID_HELP = "Write the call again in exactly this form:\n@tool name\nkey: value\n---\ntext (only if the tool takes it)\n@end";
 
-export const SAVE_REMINDER = "You put code in your reply, but nothing is saved. Save it with write_file, then test it.";
+export const SAVE_REMINDER = "You put code in your reply, but nothing is saved. Save it with write_file, then test it. Reply with only a tool block: the line @tool write_file, a path: line, a --- line, the whole file, and @end.";
 
 export function hasUnsavedCode(message: AssistantMessage): boolean {
 	if (message.stopReason === "error" || message.stopReason === "aborted" || message.content.some((block) => block.type === "toolCall")) return false;
@@ -196,7 +196,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
 		const trace = createTrace(options.runsDir, path.basename(options.agentDir));
 		for (const text of mcp?.problems ?? []) trace.write({ type: "note", text });
-		const ctx: ProtectedContext & { smallFileLines?: number } = { smallFileLines: agentFile.smallFileLines, protect: options.protect, workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
+		const ctx: ProtectedContext & { smallFileLines?: number } = { smallFileLines: agentFile.smallFileLines, protect: options.protect, noTestbench: !taskWantsTestbench(options.task), workspace: path.resolve(options.workspace), exec: options.exec ?? realExec, commands: options.commands };
 		const guard = new LoopGuard({ maxCalls: options.overrides?.maxTurns ?? agentFile.maxTurns ?? 40 });
 		const seconds = options.maxSeconds ?? agentFile.maxSeconds;
 		let timedOut = false;
@@ -215,7 +215,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 		let lastPromptTokens = 0;
 		let outputTokens = 0;
 		let saved = false;
-		let reminded = false;
+		let reminded = 0;
 		const say = options.onStep ?? (() => {});
 
 		trace.write({
@@ -248,6 +248,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 				const verdict = guard.check({ name: toolCall.name, args: (args ?? {}) as Record<string, string | number> });
 				if (verdict.allow) {
 					if (mcpNames.has(toolCall.name)) return undefined;
+					if (ctx.noTestbench && toolCall.name === "ask_agent" && /tests?bench|^tb/i.test(String((args as Record<string, unknown> | undefined)?.agent ?? ""))) return { block: true, reason: NO_TESTBENCH };
 					const refusal = protectedRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx) ?? await smallFileRefusal(toolCall.name, (args ?? {}) as Record<string, unknown>, ctx.workspace, agentFile.smallFileLines);
 					return refusal ? { block: true, reason: refusal } : undefined;
 				}
@@ -265,8 +266,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 				if (!firstPromptTokens) firstPromptTokens = message.usage.input;
 				lastPromptTokens = message.usage.input || lastPromptTokens;
 				outputTokens += message.usage.output;
-				if (!saved && !reminded && !stoppedBy && hasUnsavedCode(message)) {
-					reminded = true;
+				if (!saved && reminded < 1 && !stoppedBy && hasUnsavedCode(message)) {
+					reminded++;
 					trace.write({ type: "guard", reason: SAVE_REMINDER, stop: false });
 					say(`     guard: ${SAVE_REMINDER}`);
 					agent.followUp({ role: "user", content: SAVE_REMINDER, timestamp: Date.now() });

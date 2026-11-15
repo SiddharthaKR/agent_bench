@@ -1,3 +1,4 @@
+import { SAVE_REMINDER } from "../src/agent.ts";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -43,7 +44,7 @@ describe("sub-agents", () => {
 		const fake = model(["@tool ask_agent\nagent: helper\n---\nBuild\n@end", "module a; endmodule", "module a; endmodule", "Done."]);
 		const result = await runAgent({ ...options, fetchFn: fake.fetchFn });
 		expect(fake.requests).toHaveLength(4);
-		expect(fake.requests[2]!.messages.at(-1)!.content).toBe("You put code in your reply, but nothing is saved. Save it with write_file, then test it.");
+		expect(fake.requests[2]!.messages.at(-1)!.content).toBe(SAVE_REMINDER);
 		const rows = (await readFile(path.join(result.traceDir, "trace.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 		const child = rows.find((row) => row.type === "subagent");
 		expect(await readFile(path.join(child.traceDir, "trace.jsonl"), "utf8")).toContain('"type":"guard"');

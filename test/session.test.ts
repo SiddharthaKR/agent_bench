@@ -1,3 +1,4 @@
+import { SAVE_REMINDER } from "../src/agent.ts";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -116,7 +117,7 @@ describe("session", () => {
 		session.send("Work");
 		await done;
 		expect(model.requests).toHaveLength(2);
-		expect(model.requests[1]!.messages.at(-1)!.content).toBe("You put code in your reply, but nothing is saved. Save it with write_file, then test it.");
+		expect(model.requests[1]!.messages.at(-1)!.content).toBe(SAVE_REMINDER);
 	});
 
 	it("proposes repaired Verilog before approval", async () => {

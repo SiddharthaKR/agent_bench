@@ -1,3 +1,4 @@
+import { SAVE_REMINDER } from "../src/agent.ts";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -89,13 +90,13 @@ describe("runAgent with a scripted model", () => {
 	it("still reminds after a failed write", async () => {
 		const model = fakeModel(["@tool write_file\npath: ../outside.v\n---\nx\n@end", "module a; endmodule", "Done."]);
 		expect((await run(model)).modelCalls).toBe(3);
-		expect(model.requests[2]!.messages.at(-1)!.content).toBe("You put code in your reply, but nothing is saved. Save it with write_file, then test it.");
+		expect(model.requests[2]!.messages.at(-1)!.content).toBe(SAVE_REMINDER);
 	});
 	it.each(["```verilog\nmodule a; endmodule\n```", "module a;\nendmodule"])("reminds once about unsaved code: %s", async (code) => {
 		const model = fakeModel([code, code, "Should not be reached"]);
 		const result = await run(model);
 		expect(result.modelCalls).toBe(2);
-		expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: "user", content: "You put code in your reply, but nothing is saved. Save it with write_file, then test it." });
+		expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: "user", content: SAVE_REMINDER });
 		expect(await traceEvents(result.traceDir)).toContainEqual(expect.objectContaining({ type: "guard", reason: expect.stringContaining("nothing is saved") }));
 	});
 
