@@ -23,7 +23,7 @@ Fix these in the harness. Every change must be general: nothing may be tuned to 
 - Write two skills for the `fpga` agent, in your own words, general engineering practice only:
   - `verilog-rules.md`, `always: true`, AT MOST 220 words. The rules a small model most often breaks in synthesizable Verilog-2001 with Icarus Verilog: declare every wire/reg at module level, never inside `always`; non-blocking `<=` in clocked blocks, blocking `=` in combinational ones; size and sign every constant (`16'sd5`), declare signed operands `signed` on both sides; widen before multiply or add, then saturate by comparing the wide value against the limits and assigning the limit, never by slicing; one driver per reg; `localparam` for constants; testbench style: `$display("PASS name")` / `$display("FAIL name ...")` per check and `$finish` at the end.
   - `fixed-point.md`, `always: false`, at most 350 words: bit growth for multiply and add, arithmetic shift and rounding (round half up by adding half before the shift), saturation limits for signed N bits, a short worked saturating multiply-shift example, and how to sign-extend on read-back.
-- If `C:\Users\siddh\Documents\Personal\DUMP\ai_demo\harness\skills\fpga-rtl-design\SKILL.md` is readable, use it as a source for facts, but write new, shorter text.
+- If `<ai_demo>/harness/skills/fpga-rtl-design/SKILL.md` is readable, use it as a source for facts, but write new, shorter text.
 
 ## 2. Small files are rewritten whole
 
@@ -58,7 +58,7 @@ Fix these in the harness. Every change must be general: nothing may be tuned to 
 
 ## 7. Local scoring (`evals/` and `scripts/eval_local.sh`)
 
-- `evals/gain/`: `spec.md` and `tb/tb_gain.v` copied from `C:\Users\siddh\AppData\Local\Temp\claude\e441911c17cabf09\0b75bb93-a8a4-4813-80a8-34d6a7f7316c\scratchpad\demo` (if you cannot read that folder, say so and stop this item), plus `task.md` with: `Read spec.md and write rtl/gain.v. Then run run_sim with files: rtl/gain.v tb/tb_gain.v and fix the design until every test passes.`
+- `evals/gain/`: `spec.md` and `tb/tb_gain.v` copied from `<a scratch demo folder>` (if you cannot read that folder, say so and stop this item), plus `task.md` with: `Read spec.md and write rtl/gain.v. Then run run_sim with files: rtl/gain.v tb/tb_gain.v and fix the design until every test passes.`
 - `scripts/eval_local.sh [-n runs] [-s server] [-m model] [-w workflow.json]`: for each run, copy `evals/gain` to a fresh temp folder, run the agent (`npx tsx src/cli.ts`) or, with `-w`, the workflow CLI with `--no-pause --var design=rtl/gain.v --var tb=tb/tb_gain.v`, then INDEPENDENTLY compile and simulate `rtl/gain.v` with `tb/tb_gain.v` (programs from `config.local.json`/`config.json` `commands`, falling back to `iverilog`/`vvp` on PATH; a tiny `node` one-liner may read the JSON) and count the run as passed only if the output contains `ALL TESTS PASSED`. Print one line per run (`run 3: PASS, 12 tool calls, 41 s`) and a final `PASSED k of n`. Bash, LF line endings, works in Git Bash on Windows and on Linux.
 
 ## 8. A time limit per run

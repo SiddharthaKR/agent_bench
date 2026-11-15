@@ -16,7 +16,7 @@ Why: the owner's old harness has longer, more descriptive FPGA skills. We want t
 
 ## Part 2: topic skills (new files only, under `agents/fpga/skills/` and `agents/testbench/skills/`)
 
-Source to read: `C:\Users\siddh\Documents\Personal\DUMP\ai_demo\harness\skills\fpga-rtl-design\` (`SKILL.md`, `arithmetic.md`, `testbench.md`). Read nothing else in that repository; never open its `harness/judge` folder.
+Source to read: `<ai_demo>/harness/skills/fpga-rtl-design/` (`SKILL.md`, `arithmetic.md`, `testbench.md`). Read nothing else in that repository; never open its `harness/judge` folder.
 
 Write these, each with the same front matter as the existing skills (`name`, `description`, `always: false`), at most 2,600 characters each, plain Verilog-2001:
 

@@ -10,9 +10,9 @@ Priorities he set, in order: correct RTL first; speed; the testbench matters lit
 
 ## Where everything is
 
-- Repository: `C:\Users\siddh\Documents\Personal\Harness`, GitHub `SiddharthaKR/agent_bench`.
+- Repository: this folder, GitHub `SiddharthaKR/agent_bench`.
 - Branch `master`: milestone 0 only (pushed). Branch `ui-work-workflows`: everything else, committed locally, **not pushed**. A push needs the owner's approval.
-- Old harness with hidden judges: `C:\Users\siddh\Documents\Personal\DUMP\ai_demo`. Never open `harness/judge`.
+- Old harness with hidden judges: `<ai_demo>`. Never open `harness/judge`.
 - VerilogEval: cloned into `external/verilog-eval` (not committed), commit c498220; 39 dev and 117 held-out problems.
 - Run folders and recorded results: `runs/` (not committed). Saved comparison tables: `docs/rounds/`.
 

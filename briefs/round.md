@@ -7,7 +7,7 @@ Goal (owner's words): "produce correct, industry level, speed, fpga code workflo
 ## Hard rules
 
 - Tune only on: the VerilogEval `dev` split, our tuning tasks (`gain`, `counter`, `fir4`), and the old harness's easy task. Never read failures of `heldout` splits or of our held-out tasks (`pwm`, `seqdet`, `regbank`, `fifo`, `accum`, `uart_tx`) to change anything.
-- Never open `harness/judge` in the old harness (`C:\Users\siddh\Documents\Personal\DUMP\ai_demo`). The verdict lines the script prints and the agent traces under `runs/*/agent_bench` are fine.
+- Never open `harness/judge` in the old harness (`<ai_demo>`). The verdict lines the script prints and the agent traces under `runs/*/agent_bench` are fine.
 - Fixes must be general: a rule of Verilog or of good RTL practice, a deterministic check, a hint, a tool behaviour. No text that names or fits one problem. If a fix would only help one problem, do not make it.
 - Prefer a deterministic check or hint in code over more prompt text. Keep the always-on prompt and skills short; say in the report how many characters you added.
 - Do not use git. Do not edit `PLAN.md`. Do not push or install anything.
@@ -22,7 +22,7 @@ Goal (owner's words): "produce correct, industry level, speed, fpga code workflo
 2. Read the failures: `node scripts/verilog_eval_report.mjs runs/verilog-eval/<latest>` and, for each failed dev problem, the spec, the model's file and the trace. Group them by cause. For every group ask: could a check, a hint or one rule line have prevented it for any design of that kind?
 3. Make at most four fixes, the ones that cover the most failures. Add tests for code changes. Run `npx.cmd tsc --noEmit` (root and `web/`), `npx.cmd vitest run`, `bash scripts/check_evals.sh`. The nine reference designs must stay free of hints and pass the quality gate.
 4. Measure again with the same command as the baseline. Then run the regression check: `bash scripts/eval_set.sh tuning -n 2 -s local -w workflows/fpga-fast.json -t 150`.
-5. If the invoking message asks for it, also run the old harness's easy task: `bash scripts/h_task.sh /c/Users/siddh/Documents/Personal/DUMP/ai_demo easy local-fast -n 3 -t 300`, read the three agent traces, and include what you see.
+5. If the invoking message asks for it, also run the old harness's easy task: `bash scripts/h_task.sh <path to ai_demo> easy local-fast -n 3 -t 300`, read the three agent traces, and include what you see.
 6. Write the report to `docs/rounds/<date>-<n>.md` (create the folder; plain Markdown, under 80 lines) and print the same text as your final message:
    - numbers before and after (passed of total, median seconds, counts per verdict), and the tuning-set result;
    - the failure groups with counts;

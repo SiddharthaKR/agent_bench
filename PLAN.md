@@ -10,10 +10,10 @@ Linux is the target. Development happens on the Windows PC; the office server (1
 
 ## Where things are
 
-- Repository: `C:\Users\siddh\Documents\Personal\Harness`, GitHub `SiddharthaKR/agent_bench`.
+- Repository: this folder, GitHub `SiddharthaKR/agent_bench`.
 - Branch `master`: milestone 0 only (pushed).
 - Branch `ui-work-workflows`: everything since (committed locally, **not pushed**).
-- Old harness with the hidden judges: `C:\Users\siddh\Documents\Personal\DUMP\ai_demo`. Never read or copy `harness/judge/` into anything an agent can see.
+- Old harness with the hidden judges: `<ai_demo>`. Never read or copy `harness/judge/` into anything an agent can see.
 - UI prototype (dummy data, the look to match): https://claude.ai/artifact/3H83kZxtnRrojfDDgahqYd
 
 ## How the work is done

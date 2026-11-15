@@ -2,6 +2,19 @@
 
 Agent Bench is a light harness that lets local language models do hardware coding for FPGA, DPU and GPU projects. It runs agents and workflows through an OpenAI-compatible model server and records their tool calls. A browser app provides Work, Workflows, Trace, Agents and an optional Results screen for the owner's Lab tests.
 
+## Status
+
+Work in progress, developed on one Windows PC and meant to run on Linux. Current state, measured results and next steps are in [HANDOFF.md](HANDOFF.md); the history is in [PLAN.md](PLAN.md).
+
+Measured on 2026-11-15 with a small local model (Gemma 4 E4B on Ollama, thinking off), VerilogEval specification-to-RTL, one run each:
+
+| Set | Raw model, one request | This harness |
+|---|---|---|
+| Held-out, 117 problems (nothing tuned on them) | 49 passed (42%) | 64 passed (55%) |
+| Dev, 39 problems (tuned on) | 15 passed (38%) | 27 passed (69%) |
+
+The harness takes about 18 s per problem against about 4 s raw. Larger models have not been measured yet. No licence has been chosen for this repository yet.
+
 Folder layout:
 
 - `src/`: engine, command-line tools, local HTTP server and shared types.
