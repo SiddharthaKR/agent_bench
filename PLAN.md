@@ -162,7 +162,14 @@ The improvement loop: measure on a tuning set, read the failed runs, make a gene
 - Next: rerun `bash scripts/h_task.sh <ai_demo> easy local -n 3 -t 180 -w workflows/fpga-design-tb.json` from a frozen copy; then decide about listing the `bus-registers` skill and adding a "check the design against every spec line" step, since read-back is where the real task and the held-out `regbank` task fail.
 - Comment-policy and skill-set comparisons are not done.
 
-Queued for Codex at 15:16 on 2026-11-15, in order: S (agent asks the user instead of guessing), T (VerilogEval runner), U (quality gate).
+**Later the same day (about 16:20):**
+- Codex tasks S, T, U are built, verified and committed (448 tests): `ask_user`, the VerilogEval runner, `npm run quality`. VerilogEval is cloned into `external/` (not committed), 39 dev and 117 held-out problems; the judge passes the benchmark's references.
+- Old harness easy, valid reruns, all with Gemma 4 E4B: `fpga-design-tb` workflow 0 of 3 (about 630 s each, data path right twice, read-back wrong, every step ran to its limit); single agent with the new `bus-registers` skill 0 of 3 (one run had read-back 8 of 8 but data path 10 of 16; one had the judge's COMPILE_ERROR although the model's own simulation ran).
+- Reading across all old-harness runs: the model gets the data path right in most runs and the read-back right when it loads the bus skill, but not yet both in one run, and its own testbench costs most of the time and often does not compile. E4B is at its limit on this task; the 26B model on the server is the real target and has not been run.
+- In progress: VerilogEval dev run (39 problems, single agent, thinking off); Codex task V (module header checked against the spec, two compile hints).
+- Idea to put to the owner: a co-simulation tool that checks a streaming block against the task's bit-true Python model, so the small model does not have to write its own testbench.
+
+Queued for Codex at 15:16 on 2026-11-15 (done), in order: S (agent asks the user instead of guessing), T (VerilogEval runner), U (quality gate).
 
 - [x] Retry-workflow score read (1 of 4, retries were broken); fixed and re-measured (4 of 4 on gain with `fpga-fast`).
 - [x] MCP servers (Codex task K) committed; tests pass. Its card on the Agents screen is not yet checked in the browser (low priority).
