@@ -3,8 +3,9 @@ import * as path from "node:path";
 import type { ToolContext, ToolOutput, ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { splitLines, trimLine } from "./util.ts";
-import { lintVerilog } from "./lint.ts";
+import { lintVerilog, qualityLint } from "./lint.ts";
 import { checkInterface, isTestbench } from "./interface.ts";
+import { checkRegisters } from "./register_check.ts";
 
 export const OUT_PATH = ".build/sim.out";
 const TIMEOUT_MS = 60_000;
@@ -62,6 +63,7 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 	}
 
 	const { program, args } = expandCommand(ctx.commands.compile, rels, OUT_PATH);
+	if (/(?:^|[\\/])iverilog(?:\.exe)?$/i.test(program) && !args.includes("-Wall")) args.unshift("-Wall");
 	const r = await ctx.exec(program, args, { cwd: ctx.workspace, timeoutMs: TIMEOUT_MS, signal: ctx.signal });
 	const interfaces = await interfaceHints(rels, ctx);
 	const failed = (text: string) => fail([text, ...interfaces].join("\n"));
@@ -69,12 +71,29 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 	if (r.timedOut) return failed("Compile timed out after 60 s.");
 
 	const lines = outputLines(r.stderr, r.stdout);
+	const registers = await checkRegisters(rels, ctx);
+	const registerText = registers ? `\n${registers.text}` : "";
 	if (r.code === 0) {
+		const conflicts: string[] = [];
+		for (const file of rels) {
+			try {
+				const source = await fs.readFile(path.join(ctx.workspace, file), "utf8");
+				conflicts.push(...qualityLint(source).filter(f => f.rule === "multi-driver").map(f => `${file}:${f.line}: ${f.message}`));
+			} catch { /* A compiled input can disappear before lint. */ }
+		}
+		const bounds = lines.filter(line => /(?:select|index).*out of bound|out of bound.*(?:select|index)|Constant (?:bit|part) select .* (?:after|before|outside) vector/i.test(line));
+		if (registers && !registers.ok) return fail(`Compiled, 0 errors.${registerText}`);
 		let text = "Compiled, 0 errors.";
 		if (lines.length > 0) text += ` ${lines.length} warning lines; first: ${lines[0]}`;
-		const hints = [...interfaces, ...await lintFiles(rels, ctx.workspace)].slice(0, 3);
+		// Driver conflicts and out-of-range selects are reported, not enforced: making them fatal cost
+		// four dev problems in round 1 (a guarded select that is correct still draws the warning).
+		const findings = [
+			...conflicts.slice(0, 2).map((line) => `Hint: ${line}`),
+			...(bounds.length ? [`Hint: ${bounds[0]} A select outside the declared range reads x; check the range unless a condition guards it.`] : []),
+		];
+		const hints = [...interfaces, ...findings, ...await lintFiles(rels, ctx.workspace)].slice(0, 3);
 		if (hints.length > 0) text += `\n${hints.join("\n")}`;
-		return { ok: true, text, files: rels };
+		return { ok: true, text: text + registerText, files: rels };
 	}
 	if (lines.length === 0) return failed("Compile failed with no messages.");
 	const shown = await withSource(lines.slice(0, SHOWN), rels, ctx.workspace, ctx.smallFileLines ?? 150, lines, 2 - interfaces.length);
@@ -84,7 +103,7 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 	if (lines.length > SHOWN) text += `\n(${lines.length - SHOWN} more lines not shown)`;
 	const remaining = 2 - interfaces.length - shown.filter(line => line.startsWith("Hint: ")).length;
 	text += [...interfaces, ...(await lintFiles(rels, ctx.workspace)).slice(0, remaining)].map(hint => `\n${hint}`).join("");
-	return fail(text);
+	return fail(text + registerText);
 }
 
 const SOURCE_ECHOES = 3;

@@ -27,6 +27,19 @@ const res = (p: Partial<ExecResult> = {}): ExecResult => ({
 	...p,
 });
 
+it("reports overlapping continuous drivers as a hint and stays quiet for disjoint slices", async () => {
+	const { ctx } = fakeCtx([res(), res()]);
+	await fs.writeFile(path.join(ws, "dup.v"), "module m(input a,b, output y); assign y=a; assign y=b; endmodule");
+	const bad = await compile.run({ files: "dup.v" }, ctx);
+	expect(bad.ok).toBe(true);
+	expect(bad.text).toContain("Hint: ");
+	expect(bad.text).toContain("more than one driver");
+	await fs.writeFile(path.join(ws, "dup.v"), "module m(input a,b, output [1:0] y); assign y[0]=a; assign y[1]=b; endmodule");
+	const good = await compile.run({ files: "dup.v" }, ctx);
+	expect(good.ok).toBe(true);
+	expect(good.text).not.toContain("more than one driver");
+});
+
 interface Call {
 	command: string;
 	args: string[];
@@ -390,7 +403,7 @@ describe("compile", () => {
 		expect(calls).toHaveLength(1);
 		expect(calls[0]).toEqual({
 			command: "iverilog",
-			args: ["-o", ".build/sim.out", "a.v", "tb/t.v"],
+			args: ["-Wall", "-o", ".build/sim.out", "a.v", "tb/t.v"],
 			cwd: ws,
 			timeoutMs: 60_000,
 		});

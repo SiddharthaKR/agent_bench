@@ -102,7 +102,7 @@ const INVALID_HELP = "Write the call again in exactly this form:\n@tool name\nke
 export const SAVE_REMINDER = "You put code in your reply, but nothing is saved. Save it with write_file, then test it. Reply with only a tool block: the line @tool write_file, a path: line, a --- line, the whole file, and @end.";
 
 /** Sent when a run wants to end but the Verilog it changed does not compile. */
-export const FINAL_CHECK_FAILED = "You finished, but the files you changed do not compile. Fix every error, then run compile again before you finish.";
+export const FINAL_CHECK_FAILED = "You finished, but the changed Verilog failed its compile or RTL checks. Fix every reported error, then run compile again before you finish.";
 
 export function hasUnsavedCode(message: AssistantMessage): boolean {
 	if (message.stopReason === "error" || message.stopReason === "aborted" || message.content.some((block) => block.type === "toolCall")) return false;

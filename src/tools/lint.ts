@@ -119,8 +119,22 @@ export function qualityLint(text: string): LintFinding[] {
 				}
 			}
 		}
-		for (const m of source.matchAll(/\bassign\s+([^;]+);/g)) for (const a of assignments(m[1]!)) {
-			if (drivers.has(a.name)) add("multi-driver", base + m.index, `${a.name} has both continuous and procedural drivers.`);
+		const continuous = new Map<string, [number, number][]>();
+		for (const m of source.matchAll(/\bassign\s+([^;]+);/g)) {
+			for (const a of assignments(m[1]!)) {
+				if (drivers.has(a.name)) add("multi-driver", base + m.index, `${a.name} has both continuous and procedural drivers.`);
+			}
+			// Dynamic/generate indices and intentional tri-state drivers need elaboration.
+			const target = /^\s*([a-zA-Z_][\w$]*)\s*(?:\[\s*(\d+)\s*(?::\s*(\d+)\s*)?\])?\s*=/.exec(m[1]!);
+			if (!target || /'\s*[bBhH][\da-fA-F_xX]*[zZ]/.test(m[1]!) || /\btri(?:and|or)?\b/.test(source)) continue;
+			const name = target[1]!;
+			const first = target[2] === undefined ? -Infinity : Number(target[2]);
+			const last = target[2] === undefined ? Infinity : Number(target[3] ?? target[2]);
+			const low = Math.min(first, last), high = Math.max(first, last);
+			const ranges = continuous.get(name) ?? [];
+			if (ranges.some(([l, h]) => low <= h && high >= l)) add("multi-driver", base + m.index, `${name} has more than one driver. Keep one assignment per bit.`);
+			ranges.push([low, high]);
+			continuous.set(name, ranges);
 		}
 		if (design) {
 			for (const m of source.matchAll(/#\s*\d+(?:\.\d+)?/g)) add("delay-in-design", base + m.index, "Remove delays from synthesizable RTL.");
