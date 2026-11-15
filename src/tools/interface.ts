@@ -3,6 +3,7 @@ export interface InterfacePort {
 	name: string;
 	signed: boolean;
 	range: string;
+	specText?: string;
 }
 
 export interface ModuleHeader {
@@ -116,21 +117,54 @@ export function isTestbench(text: string): boolean {
 	return !!modules?.length && modules.every(module => module.ports.length === 0);
 }
 
-/** Only fenced, confidently readable ANSI declarations are contracts. */
+function proseHeaders(text: string): ModuleHeader[] {
+	const result: ModuleHeader[] = [];
+	const names = [...text.matchAll(/\bmodule\s+(?:named|called)\s+(?:`([a-zA-Z_][\w$]*)`|([a-zA-Z_][\w$]*)\b)/gi)];
+	for (const [index, match] of names.entries()) {
+		const section = text.slice(match.index + match[0].length, names[index + 1]?.index);
+		let found: InterfacePort[] = [];
+		const lines_ = [...section.split(/\r?\n/), ""];
+		for (const [index_, line] of lines_.entries()) {
+			const item = /^\s*(?:[-*]|\d+\.)\s+((input|output|inout)\s+((?:(?:wire|reg|logic|signed)\s+)*)(\[[^\[\]]+:[^\[\]]+\]\s*)?(?:`([a-zA-Z_][\w$]*)`|([a-zA-Z_][\w$]*)\b))(.*)$/.exec(line);
+			if (!item) {
+				// A blank line between groups of port lines does not end the list; other text does.
+				if (line.trim() === "" && found.length > 0 && index_ < lines_.length - 1) continue;
+				if (found.length >= 2) { result.push({ name: match[1] ?? match[2]!, ports: found }); break; }
+				found = [];
+				continue;
+			}
+			const width = /^\s*(\(\s*(\d+)\s*(?:-\s*)?bits?\s*\)|\[\s*(\d+)\s*(?:-\s*)?bits?\s*\])/.exec(item[7]!);
+			const bits = width ? BigInt(width[2] ?? width[3]!) : undefined;
+			found.push({
+				direction: item[2] as InterfacePort["direction"],
+				name: item[5] ?? item[6]!,
+				signed: /\bsigned\b/.test(item[3]!),
+				range: item[4]?.trim() ?? (bits !== undefined ? `[${bits - 1n}:0]` : ""),
+				specText: item[1]! + (!item[4] && width ? width[0] : ""),
+			});
+		}
+	}
+	return result;
+}
+
+/** Fenced ANSI declarations take priority over prose port lists. */
 export function specHeaders(specText: string): ModuleHeader[] {
 	const result: ModuleHeader[] = [];
+	const prose: string[] = [];
 	let fence: string | undefined;
 	let block: string[] = [];
 	for (const line of specText.split(/\r?\n/)) {
 		const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
 		if (!fence) {
 			if (marker) { fence = marker[1]!; block = []; }
+			else prose.push(line);
 		} else if (marker && marker[1]![0] === fence[0] && marker[1]!.length >= fence.length && !marker[2]!.trim()) {
 			for (const header of headers(block.join("\n")) ?? []) if (header.ports) result.push({ name: header.name, ports: header.ports });
 			fence = undefined;
+			prose.push("");
 		} else block.push(line);
 	}
-	return result;
+	return [...result, ...proseHeaders(prose.join("\n")).filter(header => !result.some(other => other.name === header.name))];
 }
 
 // Evaluate a small integer grammar without executing source text.
@@ -184,6 +218,15 @@ function normalized(range: string): string {
 	return range.replace(/\s/g, "").replace(/\[([^:]+):([^\]]+)\]/g, (_all, left: string, right: string) => `[${integer(left) ?? left}:${integer(right) ?? right}]`);
 }
 
+function bitWidth(range: string): bigint | undefined {
+	if (!range) return 1n;
+	const match = /^\[([^:]+):([^\]]+)\]$/.exec(range.replace(/\s/g, ""));
+	if (!match) return undefined;
+	const left = integer(match[1]!);
+	const right = integer(match[2]!);
+	return left === undefined || right === undefined ? undefined : (left >= right ? left - right : right - left) + 1n;
+}
+
 function description(port: InterfacePort): string {
 	return [port.direction, port.signed ? "signed" : "", port.range.replace(/\s/g, "")].filter(Boolean).join(" ");
 }
@@ -202,7 +245,13 @@ export function checkInterface(specText: string, designText: string): string[] {
 			const different: string[] = [];
 			for (const port of expected.ports) {
 				const other = actual.ports!.find(other => other.name === port.name);
-				if (other && (port.direction !== other.direction || port.signed !== other.signed || normalized(port.range) !== normalized(other.range))) different.push(`${port.name} (spec: ${description(port)}, file: ${description(other)})`);
+				if (!other) continue;
+				const prose = port.specText !== undefined;
+				const width = prose ? bitWidth(port.range) : undefined;
+				const sameWidth = width !== undefined ? width === bitWidth(other.range) : normalized(port.range) === normalized(other.range);
+				if (port.direction !== other.direction || ((!prose || port.signed) && port.signed !== other.signed) || !sameWidth) {
+					different.push(`${port.name} (spec: ${port.specText ?? description(port)}, file: ${description(other)}${prose ? ` ${other.name}` : ""})`);
+				}
 			}
 			const parts = [["Missing", missing], ["Extra", extra], ["Different", different]] as const;
 			const details = parts.filter(([, items]) => items.length).map(([label, items]) => `${label}: ${items.join(", ")}.`);
