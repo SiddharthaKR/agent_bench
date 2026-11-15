@@ -190,6 +190,15 @@ How rounds are run since 2026-11-15 evening: Codex runs a whole round from `brie
 
 Raw test (owner's request): `scripts/verilog_eval_raw.sh` sends one request per problem in the benchmark's own zero-shot format; `node scripts/verilog_eval_report.mjs --compare <harness folder> <raw folder>` prints both side by side; `docs/verilog-eval.md` has the commands for this PC and the server; `docs/test-workflows.svg` shows the two flows.
 
+**Raw model against the harness, VerilogEval dev (39 problems), Gemma 4 E4B, thinking off, 2026-11-15:**
+
+| | Passed | Median s | Wrong output | Compile error |
+|---|---|---|---|---|
+| Raw (one request, benchmark's zero-shot format) | 15 of 39 (38%) | 4.4 | 16 | 8 |
+| Harness (commit c7778f9) | 27 of 39 (69%) | 18.9 | 11 | 0 |
+
+Twelve problems passed only with the harness, none only raw. Of the twelve, six were compile errors in the raw run and six were wrong output. Dev is the set the harness was tuned on, so this gap is an upper estimate; the held-out comparison (117 problems) is the unbiased one and was started at the same time.
+
 Old harness easy, Gemma 4 E4B, after round 1 (register read-back check): 0 of 4. Two runs did not compile at the judge, one had read-back 8 of 8 but data path 4 of 16. Total so far on this task with E4B: 0 of 30. The harness faults found on the way are fixed (paths, uncompiled files, testbench boilerplate, read-back check); what is left is the model. **Next real step for this task: run it with the 26B model on the server.**
 
 Tuning set with d3f34dc, `fpga-fast`, two runs each: gain 2 of 2, counter 2 of 2, fir4 2 of 2.
