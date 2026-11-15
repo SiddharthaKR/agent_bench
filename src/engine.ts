@@ -14,7 +14,7 @@ import type { AgentInfo, Workflow } from "./shared/api.ts";
 import type { Engine } from "./shared/engine.ts";
 import { realExec } from "./tools/index.ts";
 import type { CommandConfig, Exec } from "./types.ts";
-import { createWorkflowRun, fillPlaceholders, prepareWorkflowSkills } from "./workflow.ts";
+import { createWorkflowRun, prepareWorkflowSkills } from "./workflow.ts";
 
 export interface EngineOptions {
 	/** Folder holding config.json, agents/ and workflows/. */
@@ -134,7 +134,7 @@ export function createEngine(options: EngineOptions): Engine {
 						task,
 						server: { ...server, model: step.model ?? server.model, temperature: step.temperature ?? server.temperature, extra: { ...server.extra, ...step.extra } },
 						maxSeconds: step.maxSeconds ?? options.maxSeconds,
-						protect: workflow.protect?.map((entry) => fillPlaceholders(entry, { ...workflow.vars, task: request.task })),
+						protect: step.protect,
 						overrides: { maxTurns: step.maxTurns, tools: step.tools },
 						commands,
 						runsDir,

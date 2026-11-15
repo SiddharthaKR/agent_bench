@@ -91,22 +91,22 @@ describe("compile hints", () => {
 		["Include file defs.vh not found", "do not use `include. Give every file to compile or run_sim in the files argument instead."],
 		["Concatenation operand has indefinite width.", "inside { } every constant needs a size, for example 4'd14, not 14 or 'sd14."],
 	])("explains %s without a source location", async (message, hint) => {
-		await put("a.v", "module a; endmodule");
+		await put("a.v", "module a(input unused); endmodule");
 		const { ctx } = fakeCtx([res({ code: 1, stderr: message })]);
 		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain(`Hint: ${hint}`);
 	});
 	it.each(["16'sd-32768", "16'd-2", "16'sh-8000", "16'h-2"])("explains negative sized literal %s", async (literal) => {
-		await put("a.v", `module a;\nlocalparam X = ${literal};\nendmodule`);
+		await put("a.v", `module a(input unused);\nlocalparam X = ${literal};\nendmodule`);
 		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:2: syntax error" })]);
 		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("Hint: a sized constant cannot contain a minus sign. Write the value as a plain signed decimal, for example -8192.");
 	});
 	it.each(["localparam X = 1;", "parameter X = 1;", "integer x;", "genvar x;"])("explains a block declaration: %s", async (declaration) => {
-		await put("a.v", `module a;\nalways @* begin\n  ${declaration}\nend\nendmodule`);
+		await put("a.v", `module a(input unused);\nalways @* begin\n  ${declaration}\nend\nendmodule`);
 		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:3: syntax error" })]);
 		expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("Hint: declare localparam, parameter, wire, reg and integer at module level, before the always block.");
 	});
 	it("adds declaration advice only inside always, including nested blocks", async () => {
-		await put("a.v", "module a;\nalways @* begin\nif (1'b1) begin\nreg x;\nend\nend\nwire y;\nendmodule\n");
+		await put("a.v", "module a(input unused);\nalways @* begin\nif (1'b1) begin\nreg x;\nend\nend\nwire y;\nendmodule\n");
 		const { ctx } = fakeCtx([res({ code: 1, stderr: "a.v:4: syntax error\na.v:7: syntax error" })]);
 		const result = await compile.run({ files: "a.v" }, ctx);
 		expect(result.text).toContain("4| reg x;\nHint: declare localparam, parameter, wire, reg and integer at module level, before the always block.");
@@ -378,9 +378,9 @@ describe("compile", () => {
 		expect(result.text).toContain("Hint: output y is never assigned");
 	});
 	beforeEach(async () => {
-		await put("a.v", "module a; endmodule\n");
+		await put("a.v", "module a(input unused); endmodule\n");
 		await fs.mkdir(path.join(ws, "tb"));
-		await put("tb/t.v", "module t; endmodule\n");
+		await put("tb/t.v", "module t(input unused); endmodule\n");
 	});
 
 	it("expands {files} and {out}", async () => {
@@ -417,7 +417,7 @@ describe("compile", () => {
 				"Compile failed, 8 message lines.",
 				"a.v:1: error 1",
 				// The source line is shown under the message when the file has that line.
-				"    1| module a; endmodule",
+				"    1| module a(input unused); endmodule",
 				"a.v:2: error 2",
 				"a.v:3: error 3",
 				"a.v:4: error 4",
@@ -469,7 +469,7 @@ describe("run_sim", () => {
 		expect(result.text.indexOf("FAIL c")).toBeLessThan(result.text.indexOf("Hint: "));
 	});
 	it("appends both hints using failures beyond the displayed ten", async () => {
-		await put("a.v", "module a; endmodule");
+		await put("a.v", "module a(input unused); endmodule");
 		const failures = [...Array.from({ length: 10 }, () => "FAIL other"), "FAIL a got x wanted 1", "FAIL b got 1 wanted 2", "FAIL c got 2 wanted 3"];
 		const { ctx } = fakeCtx([res(), res({ stdout: failures.join("\n") })]);
 		const r = await runSim.run({ files: "a.v" }, ctx);
@@ -478,8 +478,8 @@ describe("run_sim", () => {
 		expect(r.text.split("\n").at(-1)).toContain("Hint: x means");
 	});
 	beforeEach(async () => {
-		await put("a.v", "module a; endmodule\n");
-		await put("t.v", "module t; endmodule\n");
+		await put("a.v", "module a(input unused); endmodule\n");
+		await put("t.v", "module t(input unused); endmodule\n");
 	});
 
 	it("passes", async () => {
@@ -516,7 +516,7 @@ describe("run_sim", () => {
 		const { ctx, calls } = fakeCtx([res({ code: 1, stderr: "a.v:1: syntax error" })]);
 		const r = await runSim.run({ files: "a.v t.v" }, ctx);
 		expect(r.ok).toBe(false);
-		expect(r.text).toBe("Compile failed, 1 message lines.\na.v:1: syntax error\n    1| module a; endmodule");
+		expect(r.text).toBe("Compile failed, 1 message lines.\na.v:1: syntax error\n    1| module a(input unused); endmodule");
 		expect(calls).toHaveLength(1);
 	});
 	it("reports a timeout", async () => {
@@ -553,6 +553,8 @@ describe("pickTools", () => {
 			"compile",
 			"run_sim",
 			"ask_user",
+			"tb_skeleton",
+			"tb_checks",
 		]);
 	});
 	it("throws on an unknown name", () => {

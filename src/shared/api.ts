@@ -133,6 +133,8 @@ interface StepBase {
 
 /** The model works on a task with a fresh context. */
 export interface AgentStep extends StepBase {
+	/** Files protected for this step only. May contain workflow placeholders. */
+	protect?: string[];
 	/** Skills preloaded into this step's system prompt. */
 	skills?: string[];
 	type: "agent";
@@ -150,7 +152,7 @@ export interface AgentStep extends StepBase {
 	/** Extra request fields for this step, merged over the server's own `extra`. */
 	extra?: Record<string, unknown>;
 	/** Settings used instead when this step runs again after a failed check. */
-	retry?: { task?: string; skills?: string[]; model?: string; temperature?: number; maxTurns?: number; maxSeconds?: number; extra?: Record<string, unknown> };
+	retry?: { task?: string; skills?: string[]; protect?: string[]; model?: string; temperature?: number; maxTurns?: number; maxSeconds?: number; extra?: Record<string, unknown> };
 	/** Tool names this step may use; a subset of the agent's tools. */
 	tools?: string[];
 }

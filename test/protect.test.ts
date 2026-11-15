@@ -40,3 +40,38 @@ it.each([false, true])("fills workflow protection for every step (engine: %s)", 
 		for (const file of ["tb_given.v", "spec.md"]) expect(await readFile(path.join(root, file), "utf8")).toBe("given\n");
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
+
+it.each([false, true])("protects the design for one step and lets the next step edit it (engine: %s)", async engine => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "protect-step-"));
+	try {
+		const dir = path.join(root, "agents", "fpga");
+		await mkdir(dir, { recursive: true });
+		await writeFile(path.join(dir, "agent.json"), JSON.stringify({ name: "FPGA", tools: ["write_file"] }));
+		await writeFile(path.join(dir, "prompt.md"), "Work.");
+		await writeFile(path.join(root, "config.json"), JSON.stringify({ servers: { local: { baseUrl: "http://fake/v1", model: "fake" } } }));
+		await writeFile(path.join(root, "rtl.v"), "given\n");
+		const workflow: Workflow = { id: "protect", name: "Protect", task: "", vars: { design: "rtl.v" }, steps: [
+			{ id: "tb", name: "Testbench", type: "agent", agent: "fpga", task: "Work", protect: ["{design}"] },
+			{ id: "rtl", name: "Design", type: "agent", agent: "fpga", task: "Work" },
+		] };
+		const replies = ["@tool write_file\npath: rtl.v\n---\nblocked\n@end", "Done", "@tool write_file\npath: rtl.v\n---\nchanged\n@end", "Done"];
+		const toolReplies: string[] = [];
+		let calls = 0;
+		const fetchFn: typeof fetch = async (_url, init) => {
+			const body = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
+			if (calls % 2) toolReplies.push(body.messages.at(-1)!.content);
+			return new Response(JSON.stringify({ choices: [{ message: { content: replies[calls++] }, finish_reason: "stop" }] }));
+		};
+		const run = engine
+			? await createEngine({ root, defaultFolder: root, fetchFn }).createWorkflowRun({ workflow, folder: root, task: "Work", server: "local" })
+			: (await prepareWorkflowRun({ root, workflow, folder: root, task: "Work", fetchFn })).run;
+		await new Promise<void>(resolve => {
+			run.subscribe(event => { if (event.type === "state" && ["done", "failed"].includes(event.state.status)) resolve(); });
+			run.start();
+		});
+		expect(run.state.status).toBe("done");
+		expect(toolReplies[0]).toContain("rtl.v is given and must not be changed.");
+		expect(toolReplies[1]).toContain("Wrote rtl.v");
+		expect(await readFile(path.join(root, "rtl.v"), "utf8")).toBe("changed\n");
+	} finally { await rm(root, { recursive: true, force: true }); }
+});

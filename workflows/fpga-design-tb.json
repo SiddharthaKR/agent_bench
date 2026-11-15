@@ -31,6 +31,7 @@
 					"replace_lines",
 					"compile",
 					"run_sim",
+					"tb_checks",
 					"use_skill"
 				],
 				"task": "{task}\n\nA check failed; the report is below. Read {design} first, and {tb} if it exists. Decide from the spec which file is wrong and fix only that file. Then run run_sim with files: {design} {tb} if the testbench exists, otherwise compile, until it passes.",
@@ -62,9 +63,12 @@
 			"agent": "testbench",
 			"name": "Write the testbench",
 			"once": true,
-			"task": "{task}\n\nThis step: write only the testbench {tb} for the module in {design}. Read the spec and the module's port list. Do not change {design}. Run run_sim with files: {design} {tb}. When a check fails, work out its expected value from the spec again; change the testbench only if the testbench is wrong. End with a summary that names the checks that still fail.",
+			"task": "{task}\n\nThis step: write only the testbench {tb} for the module in {design}. Create it with tb_skeleton (design: {design}, path: {tb}) and add the checks with tb_checks. Run run_sim with files: {design} {tb}. When a check fails, work out its expected value from the spec again; change the check only if the check is wrong. End with a summary that names the checks that still fail.",
 			"skills": [
 				"testbench-template"
+			],
+			"protect": [
+				"{design}"
 			],
 			"maxSeconds": 150,
 			"extra": {

@@ -5,7 +5,9 @@
 		"write_file",
 		"replace_lines",
 		"compile",
-		"run_sim"
+		"run_sim",
+		"tb_skeleton",
+		"tb_checks"
 	],
 	"maxTurns": 40,
 	"subagents": [

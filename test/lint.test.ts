@@ -86,8 +86,8 @@ describe("lintVerilog", () => {
 			"Hint: output b is never assigned, so it reads x. Assign b itself.",
 		]);
 	});
-	it("ignores testbenches and keeps module drivers separate", () => {
-		expect(lintVerilog("module tb; reg dout; endmodule module empty(); endmodule")).toEqual([]);
+	it("checks testbench completion and keeps module drivers separate", () => {
+		expect(lintVerilog("module tb; reg dout; endmodule module empty(); endmodule")).toHaveLength(2);
 		expect(lintVerilog("module a(output reg dout); endmodule module b(output reg dout); always @* dout = 1; endmodule")).toEqual([undriven]);
 	});
 	it("returns at most three hints", () => {

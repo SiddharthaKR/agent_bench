@@ -1,4 +1,4 @@
 {
 	"name": "Testbench writer",
-	"tools": ["read_file", "write_file", "compile", "run_sim"]
+	"tools": ["read_file", "tb_skeleton", "tb_checks", "run_sim"]
 }

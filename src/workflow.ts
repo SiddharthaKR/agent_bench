@@ -44,6 +44,7 @@ export function fillPlaceholders(text: string, vars: Record<string, string>): st
 export function validateWorkflow(workflow: Workflow): string[] {
 	const problems: string[] = [];
 	const seen = new Set<string>();
+	if (workflow.protect?.some(entry => typeof entry !== "string" || !entry.trim())) problems.push("Workflow protection entries must not be blank.");
 	if (workflow.steps.length === 0) problems.push("The workflow has no steps.");
 	for (const step of workflow.steps) {
 		if (seen.has(step.id)) problems.push(`Step id "${step.id}" is duplicated.`);
@@ -55,6 +56,7 @@ export function validateWorkflow(workflow: Workflow): string[] {
 			if (step.retry?.task !== undefined && !step.retry.task.trim()) problems.push(`Step "${step.id}" needs a retry task.`);
 			for (const settings of [step, step.retry]) {
 				if (!settings) continue;
+				if (settings.protect?.some(entry => typeof entry !== "string" || !entry.trim())) problems.push(`Step "${step.id}" protection entries must not be blank.`);
 				if (settings.temperature !== undefined && (!Number.isFinite(settings.temperature) || settings.temperature < 0 || settings.temperature > 2)) problems.push(`Step "${step.id}" needs a temperature between 0 and 2.`);
 				if (settings.maxTurns !== undefined && (!Number.isInteger(settings.maxTurns) || settings.maxTurns < 1)) problems.push(`Step "${step.id}" needs at least one turn.`);
 				if (settings.maxSeconds !== undefined && (!Number.isFinite(settings.maxSeconds) || settings.maxSeconds <= 0)) problems.push(`Step "${step.id}" needs a positive time limit.`);
@@ -142,7 +144,10 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 				if (step.type === "agent") {
 					const count = agentRuns.get(step.id) ?? 0;
 					agentRuns.set(step.id, count + 1);
-					const settings = count > 0 && step.retry ? { ...step, ...step.retry, extra: { ...step.extra, ...step.retry.extra } } : step;
+					let settings = count > 0 && step.retry ? { ...step, ...step.retry, extra: { ...step.extra, ...step.retry.extra } } : step;
+					if (workflow.protect !== undefined || settings.protect !== undefined) {
+						settings = { ...settings, protect: [...(workflow.protect ?? []), ...(settings.protect ?? [])].map(entry => fillPlaceholders(entry, vars)) };
+					}
 					let taskText = fillPlaceholders(settings.task, vars);
 					if (failure) taskText += `\n\nThe check "${failure.name}" failed in round ${failure.round}:\n${failure.text}\n\nEarlier attempts:\n${attempts.join("\n")}\nFix the problem.`;
 					const onLine = (text: string) => {

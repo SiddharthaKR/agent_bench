@@ -1,3 +1,5 @@
+import { isTestbench } from "./interface.ts";
+
 const IDENTIFIER = /[a-zA-Z_][\w$]*/g;
 
 export interface LintFinding {
@@ -26,6 +28,7 @@ function assignments(text: string): { name: string; operator: string; index: num
 
 /** Text-only checks. Unrecognized control structures are left to external tools. */
 export function qualityLint(text: string): LintFinding[] {
+	if (isTestbench(text)) return lintVerilog(text).map(message => ({ line: 1, rule: "testbench", message: message.replace(/^Hint: /, ""), severity: "note" }));
 	const clean = stripRtl(text);
 	const findings: LintFinding[] = [];
 	const add = (rule: string, index: number, message: string, note = false): void => {
@@ -34,6 +37,7 @@ export function qualityLint(text: string): LintFinding[] {
 	};
 	for (const module of clean.matchAll(/\bmodule\b[\s\S]*?\bendmodule\b/g)) {
 		const source = module[0];
+		if (isTestbench(source)) continue;
 		const base = module.index;
 		const headerEnd = source.indexOf(";");
 		const header = source.slice(0, headerEnd);
@@ -163,6 +167,14 @@ function names(text: string): string[] {
 
 /** Conservative checks: ambiguous uses count as drivers to avoid false hints. */
 export function lintVerilog(text: string, maxHints = 3): string[] {
+	if (isTestbench(text)) {
+		const source = text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, part => part.startsWith('"') ? part : " ");
+		const code = stripRtl(text);
+		const hints: string[] = [];
+		if (!/\$finish\b/.test(code)) hints.push("Hint: add $finish so the testbench terminates.");
+		if (!/\$display\s*\(\s*"(?:\\.|[^"\\])*(?:PASS|FAIL)(?:\\.|[^"\\])*"/.test(source)) hints.push("Hint: add $display messages containing PASS or FAIL so checks report their results.");
+		return hints.slice(0, maxHints);
+	}
 	const clean = text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, " ");
 	const hints: string[] = [];
 	const arithmetic: string[] = [];

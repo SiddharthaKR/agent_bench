@@ -11,7 +11,7 @@ export interface ModuleHeader {
 }
 
 function clean(text: string): string {
-	return text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, " ");
+	return text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, part => part.replace(/[^\n]/g, " "));
 }
 
 function closing(text: string, start: number): number {
@@ -44,27 +44,76 @@ function ports(text: string): InterfacePort[] | undefined {
 	return result;
 }
 
-function headers(text: string): { name: string; ports: InterfacePort[] | undefined }[] | undefined {
+function parameterDefaults(text: string): string[] {
+	const declarations = text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, part => part.startsWith('"') ? part : " ");
+	const parameters: string[] = [];
+	let start = 0;
+	let depth = 0;
+	let quoted = false;
+	let type = "";
+	for (let i = 0; i <= declarations.length; i++) {
+		const char = declarations[i];
+		if (char === '"' && declarations[i - 1] !== "\\") quoted = !quoted;
+		if (quoted) continue;
+		if (char && "([{".includes(char)) depth++;
+		if (char && ")]}".includes(char)) depth--;
+		if ((char === "," && depth === 0) || i === declarations.length) {
+			let part = declarations.slice(start, i).trim();
+			if (/^(?:parameter|localparam)\b/.test(part)) { part = part.replace(/^(?:parameter|localparam)\s*/, ""); type = ""; }
+			const declaration = /^(.*?)\b([a-zA-Z_][\w$]*)\s*=([\s\S]+)$/.exec(part);
+			if (declaration) {
+				if (declaration[1]!.trim()) type = declaration[1]!.trim() + " ";
+				parameters.push(`${type}${declaration[2]}=${declaration[3]!.trim()}`);
+			}
+			start = i + 1;
+		}
+	}
+	return parameters;
+}
+
+function headers(text: string, bodyParameters = false): { name: string; ports: InterfacePort[] | undefined; parameters: string[] }[] | undefined {
 	const source = clean(text);
 	if (source.includes("/*") || source.includes("\"")) return undefined;
-	const found: { name: string; ports: InterfacePort[] | undefined }[] = [];
+	const found: { name: string; ports: InterfacePort[] | undefined; parameters: string[] }[] = [];
 	for (const match of source.matchAll(/\bmodule\s+(?:(?:automatic|static)\s+)?([a-zA-Z_][\w$]*)\b/g)) {
 		let at = match.index + match[0].length;
+		let parameters: string[] = [];
 		const skip = () => { while (/\s/.test(source[at] ?? "") && at < source.length) at++; };
 		skip();
 		if (source[at] === "#") {
 			at++;
 			skip();
 			const end = source[at] === "(" ? closing(source, at) : -1;
-			if (end < 0) { found.push({ name: match[1]!, ports: undefined }); continue; }
+			if (end < 0) { found.push({ name: match[1]!, ports: undefined, parameters }); continue; }
+			parameters = parameterDefaults(text.slice(at + 1, end));
 			at = end + 1;
 			skip();
 		}
 		const end = source[at] === "(" ? closing(source, at) : -1;
-		const parsed = end >= 0 && /^\s*;/.test(source.slice(end + 1)) ? ports(source.slice(at + 1, end)) : undefined;
-		found.push({ name: match[1]!, ports: parsed });
+		const parsed = source[at] === ";" ? [] : end >= 0 && /^\s*;/.test(source.slice(end + 1)) ? ports(source.slice(at + 1, end)) : undefined;
+		if (bodyParameters) {
+			const bodyStart = source.indexOf(";", end >= 0 ? end : at) + 1;
+			const bodyEnd = source.indexOf("endmodule", bodyStart);
+			const body = source.slice(bodyStart, bodyEnd < 0 ? undefined : bodyEnd);
+			for (const declaration of body.matchAll(/\b(?:parameter|localparam)\b[^;]*;/g)) {
+				const start = bodyStart + declaration.index;
+				parameters.push(...parameterDefaults(text.slice(start, start + declaration[0].length - 1)));
+			}
+		}
+		found.push({ name: match[1]!, ports: parsed, parameters });
 	}
 	return found;
+}
+
+export function designHeaders(text: string): (ModuleHeader & { parameters: string[] })[] | undefined {
+	const result = headers(text, true);
+	if (!result || result.some(header => !header.ports)) return undefined;
+	return result as (ModuleHeader & { parameters: string[] })[];
+}
+
+export function isTestbench(text: string): boolean {
+	const modules = designHeaders(text);
+	return !!modules?.length && modules.every(module => module.ports.length === 0);
 }
 
 /** Only fenced, confidently readable ANSI declarations are contracts. */

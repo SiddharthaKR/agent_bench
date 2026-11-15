@@ -4,7 +4,7 @@ import type { ToolContext, ToolOutput, ToolSpec } from "../types.ts";
 import { resolveInWorkspace } from "./paths.ts";
 import { splitLines, trimLine } from "./util.ts";
 import { lintVerilog } from "./lint.ts";
-import { checkInterface } from "./interface.ts";
+import { checkInterface, isTestbench } from "./interface.ts";
 
 export const OUT_PATH = ".build/sim.out";
 const TIMEOUT_MS = 60_000;
@@ -79,6 +79,8 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 	if (lines.length === 0) return failed("Compile failed with no messages.");
 	const shown = await withSource(lines.slice(0, SHOWN), rels, ctx.workspace, ctx.smallFileLines ?? 150, lines, 2 - interfaces.length);
 	let text = `Compile failed, ${lines.length} message lines.\n${shown.join("\n")}`;
+	const attribution = await failureLocation(lines, rels, ctx.workspace);
+	if (attribution) text = `${attribution}\n${text}`;
 	if (lines.length > SHOWN) text += `\n(${lines.length - SHOWN} more lines not shown)`;
 	const remaining = 2 - interfaces.length - shown.filter(line => line.startsWith("Hint: ")).length;
 	text += [...interfaces, ...(await lintFiles(rels, ctx.workspace)).slice(0, remaining)].map(hint => `\n${hint}`).join("");
@@ -86,6 +88,35 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 }
 
 const SOURCE_ECHOES = 3;
+
+function location(message: string, workspace: string): { rel: string; line: number } | undefined {
+	const match = /^(.+?):(\d+):/.exec(message);
+	if (!match) return undefined;
+	const name = match[1]!.replace(/\\/g, "/");
+	const resolved = resolveInWorkspace(workspace, path.isAbsolute(name) ? path.relative(workspace, name) : name);
+	return resolved.ok ? { rel: resolved.rel, line: Number(match[2]) } : undefined;
+}
+
+async function failureLocation(messages: string[], rels: string[], workspace: string): Promise<string | undefined> {
+	const files = new Set<string>();
+	for (const message of messages) {
+		if (/\bwarning\b/i.test(message)) continue;
+		const found = location(message, workspace);
+		if (found) {
+			if (!rels.includes(found.rel)) return undefined;
+			files.add(found.rel);
+		}
+	}
+	if (!files.size) return undefined;
+	try {
+		const kinds = await Promise.all(rels.map(async rel => ({ rel, tb: isTestbench(await fs.readFile(path.join(workspace, rel), "utf8")) })));
+		if (!kinds.some(file => file.tb) || !kinds.some(file => !file.tb)) return undefined;
+		const failing = kinds.filter(file => files.has(file.rel));
+		if (failing.every(file => file.tb)) return `The design compiled; the errors are in the testbench ${failing.map(file => file.rel).join(", ")}. Fix only the testbench.`;
+		if (failing.every(file => !file.tb)) return `The testbench compiled; the errors are in the design ${failing.map(file => file.rel).join(", ")}. Fix only the design.`;
+	} catch { /* Advice must not change the compile result. */ }
+	return undefined;
+}
 
 export async function interfaceHints(files: string[], ctx: ToolContext): Promise<string[]> {
 	if (!ctx.specTexts?.size) return [];
@@ -129,10 +160,9 @@ async function withSource(messages: string[], rels: string[], workspace: string,
 	let hints = 0;
 	for (const message of messages) {
 		out.push(message);
-		const match = /^(.+?):(\d+):/.exec(message);
-		if (!match || seen.size >= SOURCE_ECHOES) continue;
-		const rel = (match[1] ?? "").split("\\").join("/");
-		const lineNo = Number(match[2]);
+		const found = location(message, workspace);
+		if (!found || seen.size >= SOURCE_ECHOES) continue;
+		const { rel, line: lineNo } = found;
 		const key = `${rel}:${lineNo}`;
 		if (!rels.includes(rel) || seen.has(key)) continue;
 		let source = cache.get(rel);
@@ -148,7 +178,7 @@ async function withSource(messages: string[], rels: string[], workspace: string,
 		if (line === undefined || line.trim() === "") continue;
 		seen.add(key);
 		out.push(`    ${lineNo}| ${trimLine(line)}`);
-		const hint = compileHint(message, line, source.slice(0, lineNo).join("\n"));
+		const hint = compileHint(message, line, source.slice(0, lineNo - 1).join("\n"), isTestbench(source.join("\n")));
 		if (hint && hints < maxHints) {
 			out.push(`Hint: ${hint}`);
 			hints++;
@@ -179,7 +209,11 @@ async function withSource(messages: string[], rels: string[], workspace: string,
 	return out;
 }
 
-function compileHint(message: string, line: string, prefix: string): string | undefined {
+function compileHint(message: string, line: string, prefix: string, testbench: boolean): string | undefined {
+	if (testbench) {
+		if (/port .+ is not a port of/i.test(message)) return "connect only the ports of the design's module header; read the header again.";
+		if (/^\s*(?:reg\b|wire\b|integer\b|localparam\b|parameter\b|signed\s*\[|local\s|logic\b|real\b)/.test(line) && insideBody(prefix)) return "in a testbench declare reg, wire, integer and localparam at module level. Inside a task only input lines come before begin.";
+	}
 	const diagnostic = diagnosticHint(message);
 	if (diagnostic) return diagnostic;
 	if (/syntax error/i.test(message) && /\d+\s*'s?[dh]\s*-/i.test(line)) return "a sized constant cannot contain a minus sign. Write the value as a plain signed decimal, for example -8192.";
@@ -191,6 +225,22 @@ function compileHint(message: string, line: string, prefix: string): string | un
 	for (const [pattern, hint] of rules) if (pattern.test(message)) return hint;
 	if (/syntax error/i.test(message) && /^\s*(?:localparam|parameter|wire|reg|integer|genvar)\b/.test(line) && insideAlways(prefix)) return "declare localparam, parameter, wire, reg and integer at module level, before the always block.";
 	return undefined;
+}
+
+function insideBody(text: string): boolean {
+	const source = text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, " ");
+	let subprogram = false;
+	let procedural = false;
+	let depth = 0;
+	for (const token of source.match(/\b(?:task|function|endtask|endfunction|initial|always|begin|end)\b|;/g) ?? []) {
+		if (token === "task" || token === "function") subprogram = true;
+		else if (token === "endtask" || token === "endfunction") subprogram = false;
+		else if (token === "initial" || token === "always") { procedural = true; depth = 0; }
+		else if (procedural && token === "begin") depth++;
+		else if (procedural && token === "end" && --depth <= 0) procedural = false;
+		else if (procedural && token === ";" && depth === 0) procedural = false;
+	}
+	return subprogram || procedural;
 }
 
 function diagnosticHint(message: string): string | undefined {

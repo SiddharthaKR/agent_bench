@@ -28,6 +28,23 @@ function settle(run: WorkflowRun, action: () => void): Promise<void> {
 }
 
 describe("workflow", () => {
+	it("combines protection for only the current step and expands retry placeholders", async () => {
+		const selected: (string[] | undefined)[] = [];
+		const step = { ...agent, protect: ["{design}"], retry: { protect: ["{task}.v"] } };
+		const w = { ...workflow([step, { ...agent, id: "other", protect: ["other.v"] }, { ...command, onFail: { goTo: "write", maxRounds: 2 } }]), protect: ["spec.md"] };
+		const run = createWorkflowRun("r", w, "repair", deps({
+			runAgent: async s => { selected.push(s.protect); return { ok: true, text: "Done" }; },
+			exec: vi.fn().mockResolvedValueOnce(result({ stdout: "FAIL" })).mockResolvedValueOnce(result()),
+		}));
+		await settle(run, () => run.start());
+		expect(selected).toEqual([["spec.md", "rtl.v"], ["spec.md", "other.v"], ["spec.md", "repair.v"], ["spec.md", "other.v"]]);
+		expect(step.protect).toEqual(["{design}"]);
+	});
+	it("rejects blank protection in workflows, steps and retries", () => {
+		for (const w of [{ ...workflow(), protect: [" "] }, workflow([{ ...agent, protect: [""] }]), workflow([{ ...agent, retry: { protect: ["\t"] } }])]) {
+			expect(validateWorkflow(w).join(" ")).toContain("protection");
+		}
+	});
 	it("fills retry task on later attempts and appends the failure report", async () => {
 		const tasks: string[] = [];
 		const step = { ...agent, retry: { task: "Repair {design} for {task}" } };

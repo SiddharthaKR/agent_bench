@@ -6,7 +6,7 @@ import { loadConfig } from "./config.ts";
 import type { Workflow, WorkflowEvent, WorkflowRunState } from "./shared/api.ts";
 import { realExec } from "./tools/index.ts";
 import type { Exec } from "./types.ts";
-import { createWorkflowRun, fillPlaceholders, prepareWorkflowSkills } from "./workflow.ts";
+import { createWorkflowRun, prepareWorkflowSkills } from "./workflow.ts";
 
 export { runAgent, loadAgent } from "./agent.ts";
 export type { AgentFile, LoadAgentOptions, RunOptions, RunResult, EndReason } from "./agent.ts";
@@ -78,7 +78,7 @@ export async function prepareWorkflowRun(options: RunWorkflowOptions) {
 				server: { ...server, model: step.model ?? options.model ?? server.model, temperature: step.temperature ?? server.temperature, extra: { ...server.extra, ...step.extra } },
 				commands: config.commands, runsDir: path.join(root, "runs"), exec,
 				onQuestion, skills: step.skills, signal, onStep: onLine, maxSeconds: step.maxSeconds ?? options.maxSeconds, fetchFn: options.fetchFn,
-				protect: workflow.protect?.map((entry) => fillPlaceholders(entry, { ...workflow.vars, task: options.task })),
+				protect: step.protect,
 				overrides: { maxTurns: step.maxTurns, tools: step.tools },
 			});
 			if (result.finalText) onLine(result.finalText);
