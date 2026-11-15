@@ -42,6 +42,8 @@ The tuning set contains `gain`, `counter`, and `fir4`. The held-out set contains
 ## External VerilogEval
 
 Run specification-to-RTL VerilogEval v2 with `bash scripts/verilog_eval.sh dev -n 2 -s local-fast -t 90`. The external benchmark must be cloned first. See [setup, split policy, judging and failure reports](evals-external/README.md). Tune only on dev; measure heldout without reading its failures to adjust skills.
+Run the bare model with `bash scripts/verilog_eval_raw.sh dev -s local-fast`; see [the repeatable PC and office server procedure](docs/verilog-eval.md).
+Compare saved runs with `node scripts/verilog_eval_report.mjs --compare <harness folder> <raw folder>`.
 ## RTL quality gate
 
 Run `npm run quality -- design.v` for a model-free RTL check. Findings include line numbers; notes do not fail the gate. The final line is `QUALITY PASS` or `QUALITY FAIL`, with exit code 1 for failures. Optional `commands.lint` (Verilator) and `commands.synth` (Yosys) arrays in config enable external checks when installed; the configured Icarus compiler also runs with `-Wall`. The tools line lists checks that ran. Eval runs record `quality` and `qualityFindings` separately from the functional verdict; `bash scripts/check_evals.sh` checks every reference.

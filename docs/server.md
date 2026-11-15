@@ -62,3 +62,9 @@ bash scripts/h_task.sh <path-to-ai_demo> medium office <model-id> -n 3 -t 600
 bash scripts/eval_local.sh -s office -m <model-id> -n 3 -t 600
 ```
 Scores append to runs/results.jsonl. In the browser, enable Lab tools and open Results, then Reload. H traces remain in the old harness's run folder; local evaluation traces remain under runs/.
+
+## VerilogEval: raw model against the harness
+
+Follow [the saved raw and harness procedure](verilog-eval.md) for dev and held-out runs and their comparison. First prepare the pinned benchmark clone in `external/verilog-eval`, Icarus (`iverilog` and `vvp`) on PATH, and `config.local.json` with the server URL, model ID and any compiler paths.
+
+Thinking on or off is set per server entry in `config.json` through `extra` (and may be overridden by `config.local.json`). `local-fast` sends `reasoning_effort: "none"`; `local` leaves the model's default in effect. LM Studio may ignore `reasoning_effort`. To see whether thinking was returned, inspect the `reasoning` field of a `response` event in the harness's `trace.jsonl`, or `reply.reasoning` in the raw attempt's `reply.json`. A populated field shows returned thinking; an empty field does not prove the server performed none.

@@ -249,6 +249,7 @@ async function run(argv) {
 	const median = times.length % 2 ? times[mid] : (times[mid - 1] + times[mid]) / 2;
 	console.log(`Passed ${passed} of ${rows.length} (${(100 * passed / rows.length).toFixed(1)}%). Median ${median.toFixed(1)} s; mean ${(times.reduce((sum, value) => sum + value, 0) / times.length).toFixed(1)} s.`);
 	console.log(["PASS", "MISMATCH", "COMPILE_ERROR", "NO_FILE", "TIME", "JUDGE_ERROR"].map((verdict) => `${verdict} ${rows.filter((row) => row.verdict === verdict).length}`).join("; "));
+	console.log(destination);
 	return passed === rows.length ? 0 : 1;
 }
 
@@ -257,6 +258,63 @@ function resultFiles(folder) {
 		const file = path.join(folder, entry.name);
 		return entry.isDirectory() && !["traces", "judge"].includes(entry.name) ? resultFiles(file) : entry.name === "result.json" ? [file] : [];
 	});
+}
+
+export function compareRuns(harnessFolder, rawFolder) {
+	const load = (folder) => resultFiles(path.resolve(folder)).sort().map((file) => json(file));
+	const harness = load(harnessFolder);
+	const raw = load(rawFolder);
+	if (!harness.length || !raw.length) throw new Error("Both comparison folders must contain results.");
+	const key = (row) => `${row.task}\t${row.attempt ?? 1}`;
+	const index = (rows) => {
+		const entries = new Map();
+		for (const row of rows) {
+			if (entries.has(key(row))) throw new Error(`Duplicate result for ${row.task}, attempt ${row.attempt ?? 1}.`);
+			entries.set(key(row), row);
+		}
+		return entries;
+	};
+	const left = index(harness);
+	const right = index(raw);
+	const keys = [...new Set([...left.keys(), ...right.keys()])].sort();
+	const lines = ["Problem | Harness verdict | Harness seconds | Raw verdict | Raw seconds"];
+	const repeated = new Set([...harness, ...raw].filter(row => (row.attempt ?? 1) > 1).map(row => row.task));
+	for (const id of keys) {
+		const h = left.get(id);
+		const r = right.get(id);
+		const row = h ?? r;
+		const label = row.task + (repeated.has(row.task) ? ` #${row.attempt ?? 1}` : "");
+		lines.push(`${label} | ${h?.verdict ?? "—"} | ${h ? Number(h.seconds).toFixed(1) : "—"} | ${r?.verdict ?? "—"} | ${r ? Number(r.seconds).toFixed(1) : "—"}`);
+	}
+	for (const [label, rows] of [["Harness", harness], ["Raw", raw]]) {
+		const times = rows.map(row => Number(row.seconds)).sort((a, b) => a - b);
+		const mid = Math.floor(times.length / 2);
+		const median = times.length % 2 ? times[mid] : (times[mid - 1] + times[mid]) / 2;
+		const passed = rows.filter(row => row.verdict === "PASS").length;
+		lines.push(`${label}: passed ${passed} of ${rows.length} (${(100 * passed / rows.length).toFixed(1)}%). Median ${median.toFixed(1)} s.`);
+	}
+	const passedH = new Set(harness.filter(row => row.verdict === "PASS").map(row => row.task));
+	const passedR = new Set(raw.filter(row => row.verdict === "PASS").map(row => row.task));
+	for (const [label, names] of [
+		["Passed by both", [...passedH].filter(name => passedR.has(name))],
+		["Passed only with the harness", [...passedH].filter(name => !passedR.has(name))],
+		["Passed only raw", [...passedR].filter(name => !passedH.has(name))],
+	]) lines.push(`${label}: ${names.sort().join(", ") || "None"}`);
+	if (repeated.size) lines.push("Totals count attempts; pass lists count problems with at least one PASS.");
+	const differences = [];
+	const hNames = new Set(harness.map(row => row.task));
+	const rNames = new Set(raw.map(row => row.task));
+	const onlyH = [...hNames].filter(name => !rNames.has(name)).sort();
+	const onlyR = [...rNames].filter(name => !hNames.has(name)).sort();
+	if (onlyH.length || onlyR.length) differences.push(`problems only in harness: ${onlyH.join(", ") || "None"}; only raw: ${onlyR.join(", ") || "None"}`);
+	for (const field of ["model", "server"]) {
+		const values = rows => [...new Set(rows.map(row => row[field] ?? "unknown"))].sort();
+		const h = values(harness);
+		const r = values(raw);
+		if (JSON.stringify(h) !== JSON.stringify(r)) differences.push(`${field}: harness ${h.join(", ")}; raw ${r.join(", ")}`);
+	}
+	if (differences.length) lines.push(`Note: ${differences.join("; ")}.`);
+	return lines.join("\n");
 }
 
 function report(folder, all) {
@@ -327,11 +385,11 @@ export function parseVerdict({ compile, simulate, output = "", noFile = false, t
 	if (noFile) verdict = "NO_FILE";
 	else if (!compile || compile.error || compile.signal || compile.status === null) verdict = "JUDGE_ERROR";
 	else if (compile.status !== 0) verdict = "COMPILE_ERROR";
-	else if (!simulate || simulate.error || simulate.signal || simulate.status !== 0 || /^TIMEOUT\s*$/m.test(output)) verdict = "JUDGE_ERROR";
+	else if (!simulate || simulate.error || simulate.signal || simulate.status !== 0) verdict = "JUDGE_ERROR";
 	else {
 		const matches = [...output.matchAll(/^Mismatches:\s*(\d+)\s+in\s+(\d+)\s+samples\s*$/gm)];
 		verdict = matches.length === 1 && Number(matches[0][2]) > 0
-			? Number(matches[0][1]) === 0 ? "PASS" : "MISMATCH" : "JUDGE_ERROR";
+			? Number(matches[0][1]) > 0 ? "MISMATCH" : /^TIMEOUT\s*$/m.test(output) ? "JUDGE_ERROR" : "PASS" : "JUDGE_ERROR";
 	}
 	return timedOut && verdict !== "PASS" ? "TIME" : verdict;
 }
@@ -346,6 +404,7 @@ async function selfTest() {
 		const cases = [
 			[{ output: "Mismatches: 0 in 20 samples\n" }, "PASS"],
 			[{ output: "Mismatches: 2 in 20 samples\n" }, "MISMATCH"],
+			[{ output: "TIMEOUT\nMismatches: 2 in 20 samples\n" }, "MISMATCH"],
 			[{ output: "Hint: Output 'x' has no mismatches.\n" }, "JUDGE_ERROR"],
 			[{ output: "Mismatches: 0 in 0 samples\n" }, "JUDGE_ERROR"],
 			[{ output: "Mismatches: 0 in 20 samples\nTIMEOUT\n" }, "JUDGE_ERROR"],
@@ -410,6 +469,11 @@ async function selfTest() {
 }
 
 function main(argv) {
+	if (argv[0] === "--compare") {
+		if (argv.length !== 3) throw new Error("Usage: node scripts/verilog_eval_report.mjs --compare <harness run folder> <raw run folder>");
+		console.log(compareRuns(argv[1], argv[2]));
+		return;
+	}
 	if (argv[0] === "--self-test") return selfTest();
 	if (argv[0] === "--write-split") { ensureSplits(problemNames(), true); return; }
 	if (argv[0] === "--check-references") return checkReferences();
@@ -417,6 +481,8 @@ function main(argv) {
 	if (!argv[0] || argv.some((arg, i) => i > 0 && arg !== "--all")) throw new Error("Usage: node scripts/verilog_eval_report.mjs <run folder> [--all]");
 	return report(argv[0], argv.includes("--all"));
 }
+
+export { root, dataset, read, save, namesIn, problemNames, ensureSplits, runOptions, benchmarkRevision, execute, outputOf };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	Promise.resolve().then(() => main(process.argv.slice(2))).then(
