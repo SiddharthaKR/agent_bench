@@ -5,7 +5,8 @@
 - Noise on dev: the same harness code scored 22, 24, 25 of 39 (mean 23.7); raw 17 to 20 (mean 18.5). A change smaller than 3 problems is not evidence; yesterday's 27 was a lucky run.
 - Kept: a third final-compile round showing only the exact error line; the "two drivers" hint once per file. No measured gain (24, 25 of 39); harmless and tested.
 - Reverted: clearer skill descriptions. Unfitting skills were loaded more often (49% against 43%), probably because the always-on prompt still names counters under reset-and-state.
-- Not done: the truth-table self-check (Stage 3 of `briefs/z-noise-and-fixes.md`). Codex skipped it after tuning gave 5 of 6 (fir4 timed out once; probably noise). This is the next step: wrong logic that compiles is the largest failure group left.
+- Truth-table self-check (task Z3, 2026-11-17): built, then discarded. It accepts 1 of all 156 VerilogEval specs and 0 of 39 dev specs, so it never fired. Report: `docs/rounds/2026-11-16-2.md`.
+- Next: wrong logic that compiles is still the largest failure group, mostly state machines and other clocked logic. A useful behaviour check must handle clocked designs, for example two drafts simulated against each other on random inputs.
 - Tuning script fails at start on this PC (tsx: os.userInfo ENOMEM); Codex used a workaround. Needs a look.
 - Report: `docs/rounds/2026-11-16-1.md`. 550 tests pass.
 
