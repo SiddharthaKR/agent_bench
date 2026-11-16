@@ -40,6 +40,29 @@ it("reports overlapping continuous drivers as a hint and stays quiet for disjoin
 	expect(good.text).not.toContain("more than one driver");
 });
 
+it("shows one driver-conflict hint per file across a run and resets for a new run", async () => {
+	const { ctx } = fakeCtx([]);
+	ctx.specTexts = new Map();
+	const source = "module m(input a,b, output y,z); assign y=a; assign y=b; assign z=a; assign z=b; endmodule";
+	await fs.writeFile(path.join(ws, "a.v"), source);
+	await fs.writeFile(path.join(ws, "b.v"), source.replace("module m", "module n"));
+	const first = await compile.run({ files: "a.v" }, { ...ctx });
+	expect(first.text.match(/more than one driver/g)).toHaveLength(1);
+	await fs.writeFile(path.join(ws, "a.v"), `${source}\n// rewritten\n`);
+	expect((await compile.run({ files: "./a.v" }, { ...ctx })).text).not.toContain("more than one driver");
+	expect((await compile.run({ files: "b.v" }, { ...ctx })).text).toContain("more than one driver");
+	expect((await compile.run({ files: "a.v" }, { ...ctx, specTexts: new Map() })).text).toContain("more than one driver");
+});
+
+it("shares driver-hint history with the compile inside run_sim", async () => {
+	const { ctx } = fakeCtx([]);
+	ctx.specTexts = new Map();
+	await fs.writeFile(path.join(ws, "a.v"), "module m(input a,b, output y); assign y=a; assign y=b; endmodule");
+	expect((await compile.run({ files: "a.v" }, ctx)).text).toContain("more than one driver");
+	expect((await runSim.run({ files: "a.v" }, { ...ctx })).text).not.toContain("more than one driver");
+	expect((await compile.run({ files: "a.v" }, ctx)).text).not.toContain("more than one driver");
+});
+
 interface Call {
 	command: string;
 	args: string[];

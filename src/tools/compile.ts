@@ -10,6 +10,7 @@ import { checkRegisters } from "./register_check.ts";
 export const OUT_PATH = ".build/sim.out";
 const TIMEOUT_MS = 60_000;
 const SHOWN = 5;
+const driverHints = new WeakMap<Map<string, string>, Set<string>>();
 
 /** `{files}` entries expand to one argument per file; `{out}` is replaced inside any entry. */
 export function expandCommand(
@@ -38,7 +39,10 @@ export function outputLines(...parts: string[]): string[] {
 export type CompileOutcome = ToolOutput & { files: string[] };
 
 /** Shared by compile and run_sim. */
-export async function compileFiles(filesArg: unknown, ctx: ToolContext & { smallFileLines?: number }): Promise<CompileOutcome> {
+export async function compileFiles(filesArg: unknown, ctx: ToolContext & { smallFileLines?: number }, diagnosticsOnly = false): Promise<CompileOutcome> {
+	ctx.specTexts ??= new Map();
+	let hintedFiles = driverHints.get(ctx.specTexts);
+	if (!hintedFiles) { hintedFiles = new Set(); driverHints.set(ctx.specTexts, hintedFiles); }
 	const fail = (text: string): CompileOutcome => ({ ok: false, text, files: [] });
 	const names = String(filesArg ?? "").split(/\s+/).filter((s) => s !== "");
 	if (names.length === 0) return fail("Give at least one file to compile.");
@@ -74,11 +78,13 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 	const registers = await checkRegisters(rels, ctx);
 	const registerText = registers ? `\n${registers.text}` : "";
 	if (r.code === 0) {
-		const conflicts: string[] = [];
+		const conflicts = new Map<string, string>();
 		for (const file of rels) {
+			if (hintedFiles.has(file)) continue;
 			try {
 				const source = await fs.readFile(path.join(ctx.workspace, file), "utf8");
-				conflicts.push(...qualityLint(source).filter(f => f.rule === "multi-driver").map(f => `${file}:${f.line}: ${f.message}`));
+				const conflict = qualityLint(source).find(f => f.rule === "multi-driver");
+				if (conflict) conflicts.set(file, `Hint: ${file}:${conflict.line}: ${conflict.message}`);
 			} catch { /* A compiled input can disappear before lint. */ }
 		}
 		const bounds = lines.filter(line => /(?:select|index).*out of bound|out of bound.*(?:select|index)|Constant (?:bit|part) select .* (?:after|before|outside) vector/i.test(line));
@@ -88,14 +94,26 @@ export async function compileFiles(filesArg: unknown, ctx: ToolContext & { small
 		// Driver conflicts and out-of-range selects are reported, not enforced: making them fatal cost
 		// four dev problems in round 1 (a guarded select that is correct still draws the warning).
 		const findings = [
-			...conflicts.slice(0, 2).map((line) => `Hint: ${line}`),
+			...[...conflicts.values()].slice(0, 2),
 			...(bounds.length ? [`Hint: ${bounds[0]} A select outside the declared range reads x; check the range unless a condition guards it.`] : []),
 		];
 		const hints = [...interfaces, ...findings, ...await lintFiles(rels, ctx.workspace)].slice(0, 3);
+		for (const [file, hint] of conflicts) if (hints.includes(hint)) hintedFiles.add(file);
 		if (hints.length > 0) text += `\n${hints.join("\n")}`;
 		return { ok: true, text: text + registerText, files: rels };
 	}
 	if (lines.length === 0) return failed("Compile failed with no messages.");
+	if (diagnosticsOnly) {
+		for (const message of `${r.stderr}\n${r.stdout}`.split(/\r?\n/)) {
+			if (/\bwarning\b/i.test(message)) continue;
+			const found = location(message, ctx.workspace);
+			if (!found || !rels.includes(found.rel)) continue;
+			try {
+				const source = (await fs.readFile(path.join(ctx.workspace, found.rel), "utf8")).split(/\r?\n/)[found.line - 1];
+				if (source !== undefined) return fail(`${message}\n    ${found.line}| ${source}`);
+			} catch { /* Keep the normal diagnostic if the source disappeared. */ }
+		}
+	}
 	const shown = await withSource(lines.slice(0, SHOWN), rels, ctx.workspace, ctx.smallFileLines ?? 150, lines, 2 - interfaces.length);
 	let text = `Compile failed, ${lines.length} message lines.\n${shown.join("\n")}`;
 	const attribution = await failureLocation(lines, rels, ctx.workspace);

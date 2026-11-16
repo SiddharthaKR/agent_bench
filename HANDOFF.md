@@ -1,5 +1,14 @@
 # Handoff: where the work stands and what comes next
 
+## Task Z result (2026-11-16, run by Codex, checked by Claude)
+
+- Noise on dev: the same harness code scored 22, 24, 25 of 39 (mean 23.7); raw 17 to 20 (mean 18.5). A change smaller than 3 problems is not evidence; yesterday's 27 was a lucky run.
+- Kept: a third final-compile round showing only the exact error line; the "two drivers" hint once per file. No measured gain (24, 25 of 39); harmless and tested.
+- Reverted: clearer skill descriptions. Unfitting skills were loaded more often (49% against 43%), probably because the always-on prompt still names counters under reset-and-state.
+- Not done: the truth-table self-check (Stage 3 of `briefs/z-noise-and-fixes.md`). Codex skipped it after tuning gave 5 of 6 (fir4 timed out once; probably noise). This is the next step: wrong logic that compiles is the largest failure group left.
+- Tuning script fails at start on this PC (tsx: os.userInfo ENOMEM); Codex used a workaround. Needs a look.
+- Report: `docs/rounds/2026-11-16-1.md`. 550 tests pass.
+
 Written 2026-11-16. Read this first, then `PLAN.md` for the full history and tables. "Agent Bench" is a working name.
 
 ## Goal (owner's words)

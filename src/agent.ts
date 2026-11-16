@@ -3,6 +3,7 @@
  * wires tools, loop guard and trace into pi-agent-core, and reports how it ended.
  */
 import { createQuestionHandler } from "./tools/ask_user.ts";
+import { compileFiles } from "./tools/compile.ts";
 import { createDeadline } from "./deadline.ts";
 import type { Question } from "./types.ts";
 import { readFile } from "node:fs/promises";
@@ -315,18 +316,18 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 			if (!options.signal?.aborted) await agent.prompt(options.task);
 			// A run may not end on Verilog that was never compiled: the harness compiles it and hands back a failure.
 			const compileSpec = specs.find((spec) => spec.name === "compile");
-			for (let round = 0; compileSpec && round < 2; round++) {
+			for (let round = 0; compileSpec && round < 3; round++) {
 				const lastReply = [...agent.state.messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
 				if (uncompiled.size === 0 || timedOut || stoppedBy || options.signal?.aborted || lastReply?.stopReason !== "stop") break;
 				// Only the design must compile for a run to end; a testbench of the model's own that does not compile is not worth more rounds.
 				const designs = [...touched].filter((file) => !looksLikeTestbench(file));
 				if (designs.length === 0 || ![...uncompiled].some((file) => !looksLikeTestbench(file))) break;
 				const files = designs.join(" ");
-				const checked = await compileSpec.run({ files }, ctx);
+				const checked = round === 2 ? await compileFiles(files, ctx, true) : await compileSpec.run({ files }, ctx);
 				trace.write({ type: "guard", reason: `Final check: compile ${files}: ${checked.ok ? "ok" : "failed"}`, stop: false });
 				say(`     final check: compile ${files} ${checked.ok ? "✓" : "✗"}`);
 				if (checked.ok) { uncompiled.clear(); break; }
-				await agent.prompt(`${FINAL_CHECK_FAILED}\n${checked.text}`);
+				await agent.prompt(round === 2 ? checked.text : `${FINAL_CHECK_FAILED}\n${checked.text}`);
 			}
 		} catch (thrown) {
 			error = (thrown as Error).message;

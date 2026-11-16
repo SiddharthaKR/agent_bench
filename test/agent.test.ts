@@ -125,6 +125,35 @@ describe("runAgent with a scripted model", () => {
 		expect(events).toContainEqual(expect.objectContaining({ type: "guard", reason: expect.stringContaining("Final check: compile a.v: ok") }));
 	});
 
+	it("gives one extra final compile round with only the exact diagnostic and source line", async () => {
+		let compiles = 0;
+		const diagnostic = `a.v:1: syntax error ${"detail".repeat(50)}`;
+		const source = `module a endmodule // ${"source".repeat(50)}`;
+		const exec: Exec = async () => {
+			compiles++;
+			return { code: compiles <= 3 ? 1 : 0, stdout: "", stderr: compiles <= 3 ? `${diagnostic}\n` : "", timedOut: false, notFound: false };
+		};
+		const model = fakeModel([
+			`@tool write_file\npath: a.v\n---\n${source}\n@end`, "Done.", "Done.", "Done.",
+			"@tool write_file\npath: a.v\n---\nmodule a; endmodule\n@end",
+			"@tool compile\nfiles: a.v\n@end", "Fixed.",
+		]);
+		const result = await run(model, exec);
+		expect(result.reason).toBe("done");
+		expect(compiles).toBe(4);
+		expect(model.requests[4]!.messages.at(-1)!.content).toBe(`${diagnostic}\n    1| ${source}`);
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toBe("module a; endmodule\n");
+	});
+
+	it("bounds final compile recovery at three rounds without rewriting the design", async () => {
+		let compiles = 0;
+		const model = fakeModel(["@tool write_file\npath: a.v\n---\nmodule a endmodule\n@end", "Done.", "Done.", "Done.", "Done."]);
+		await run(model, async () => { compiles++; return { code: 1, stdout: "", stderr: "a.v:1: syntax error", timedOut: false, notFound: false }; });
+		expect(compiles).toBe(3);
+		expect(model.requests).toHaveLength(5);
+		expect(await readFile(path.join(workspace, "a.v"), "utf8")).toBe("module a endmodule\n");
+	});
+
 	it("does not run the final check when the model compiled its last change, or changed no Verilog", async () => {
 		let compiles = 0;
 		const exec: Exec = async () => { compiles++; return { code: 0, stdout: "", stderr: "", timedOut: false, notFound: false }; };
