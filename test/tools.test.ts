@@ -323,6 +323,12 @@ describe("write_file", () => {
 		const r = await writeFile.run({ path: "a.v" }, plainCtx());
 		expect(r).toEqual({ ok: false, text: "write_file needs the file contents after a --- line." });
 	});
+	it("rejects the context placeholder as file text", async () => {
+		await put("a.v", "module a; endmodule\n");
+		const r = await writeFile.run({ path: "a.v", content: "(file text omitted; the current file is on disk)\n" }, plainCtx());
+		expect(r).toEqual({ ok: false, text: "That is a placeholder from an earlier call, not file text. Read a.v and send the complete file contents." });
+		expect(await get("a.v")).toBe("module a; endmodule\n");
+	});
 	it("rejects path escape", async () => {
 		const r = await writeFile.run({ path: "../evil.v", content: "x" }, plainCtx());
 		expect(r.ok).toBe(false);

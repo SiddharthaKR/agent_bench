@@ -19,6 +19,10 @@ export const writeFile: ToolSpec = {
 		if (typeof args.content !== "string") {
 			return { ok: false, text: "write_file needs the file contents after a --- line." };
 		}
+		// Older calls in the context show a placeholder instead of their text; a model sometimes copies it.
+		if (/^\s*\(file text omitted; the current file is on disk\)\s*$/.test(args.content)) {
+			return { ok: false, text: `That is a placeholder from an earlier call, not file text. Read ${p.rel} and send the complete file contents.` };
+		}
 
 		// Collapse trailing blank lines so the file ends in exactly one newline.
 		const repaired = /\.(v|sv|vh|svh)$/i.test(p.rel) ? autofixVerilog(args.content) : { text: args.content, notes: [] };

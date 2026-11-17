@@ -12,6 +12,10 @@
 
 Written 2026-11-16. Read this first, then `PLAN.md` for the full history and tables. "Agent Bench" is a working name.
 
+## Experiments 2026-11-17 (6 ideas, 3 dev runs each)
+
+None cleared +3 over baseline ≈24/39. Review gate 24.0, review+thinking 22.7, harness-chosen skills 25.0 (half the time), golden-model diff 25.7 (fewer wrong answers, more timeouts), plan-first 22.3, split workflow on old easy task 0 of 5. Only the `write_file` placeholder guard was merged. Details: `docs/rounds/2026-11-17-experiments.md`; code in `Harness-exp/{A,C,D,F}` (branches `exp/*`).
+
 ## Goal (owner's words)
 
 "Produce correct, industry level, speed, fpga code workflow using this tool for local models by repetitive improvement."
