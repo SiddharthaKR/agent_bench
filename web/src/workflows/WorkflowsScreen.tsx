@@ -6,6 +6,7 @@ import { api, listen, runEventsUrl } from "../api.ts";
 import { applyRunEvent, countRuns, nextId, removeStep, runStatus } from "./logic.ts";
 import type { RunView } from "./logic.ts";
 import { StepCard } from "./StepCard.tsx";
+import { EvalPanel } from "./EvalPanel.tsx";
 import { WorkflowGraph } from "./WorkflowGraph.tsx";
 import "./workflows.css";
 
@@ -197,7 +198,9 @@ export function WorkflowsScreen(props: ScreenProps) {
 	}
 
 	const counts = countRuns(run?.workflow.steps ?? [], state?.steps ?? []);
-	const canResume = state && ["failed", "stopped", "paused"].includes(state.status);
+	// A VerilogEval problem shown in the cards is driven by the panel below, not by these buttons.
+	const evalView = run?.id.includes("/") ?? false;
+	const canResume = !evalView && state && ["failed", "stopped", "paused"].includes(state.status);
 	const running = !!run && (!state || state.status === "running" || state.status === "waiting");
 	const paused = state?.status === "paused";
 	const mainText = running ? "Stop" : paused ? "Continue" : state && state.status !== "idle" ? "Run again" : "Run workflow";
@@ -209,13 +212,22 @@ export function WorkflowsScreen(props: ScreenProps) {
 			<div className="wf-row wf-between"><div className="wf-row wf-choices"><span className="label">Workflow</span>{workflows.map((item) => <button type="button" className="btn wf-choice" key={item.id} aria-label={item.name || "Unnamed workflow"} aria-pressed={selected === item.id} onClick={() => setSelected(item.id)}>{item.name || "Unnamed workflow"}</button>)}<button type="button" className="btn btn-dashed" disabled={loading || busy} onClick={createWorkflow}>New workflow</button></div>{workflow && <span className={`pill ${saved[selected] === JSON.stringify(workflow) ? "" : "warn"}`}>{saved[selected] === JSON.stringify(workflow) ? "Saved" : "Unsaved"}</span>}</div>
 			{!workflow && <p className="muted">{loading ? "Loading workflows…" : "No workflows yet."}</p>}
 			{workflow && <>
-				<div className="wf-fields"><label>Name<input className="input" disabled={busy} value={workflow.name} onChange={(event) => edit({ ...workflow, name: event.target.value })} /></label><label className="wf-task">Task for this run<input className="input" disabled={busy} value={workflow.task} onChange={(event) => edit({ ...workflow, task: event.target.value })} /></label><div className="wf-actions"><button type="button" className={`btn ${running ? "btn-danger" : "btn-primary"}`} disabled={busy} onClick={running ? stop : paused ? () => resume() : start}>{mainText}</button>{paused && <button type="button" className="btn btn-danger" disabled={busy} onClick={stop}>Stop</button>}</div></div>
+				<div className="wf-fields"><label>Name<input className="input" disabled={busy} value={workflow.name} onChange={(event) => edit({ ...workflow, name: event.target.value })} /></label><label className="wf-task">Task for this run<input className="input" disabled={busy} value={workflow.task} onChange={(event) => edit({ ...workflow, task: event.target.value })} /></label><div className="wf-actions"><button type="button" className={`btn ${running && !evalView ? "btn-danger" : "btn-primary"}`} disabled={busy} onClick={evalView ? () => setRuns((previous) => { const next = { ...previous }; delete next[selected]; return next; }) : running ? stop : paused ? () => resume() : start}>{evalView ? "Clear the VerilogEval view" : mainText}</button>{paused && <button type="button" className="btn btn-danger" disabled={busy} onClick={stop}>Stop</button>}</div></div>
 				{[errors[selected], saveErrors[selected], errors[""]].filter(Boolean).map((error, index) => <div key={index} role="alert" className="tone-bad">{error}</div>)}
 				<div className="wf-variables"><span className="label">Variables</span>{rows.map(([name, value], index) => <div className="wf-variable" key={index}><label>Name<input className="input" disabled={busy} value={name} onChange={(event) => updateVariables(rows.map((row, n) => n === index ? [event.target.value, value] : row))} /></label><label>Value<input className="input" disabled={busy} value={value} onChange={(event) => updateVariables(rows.map((row, n) => n === index ? [name, event.target.value] : row))} /></label><button type="button" className="btn btn-ghost" disabled={busy} aria-label={`Remove variable ${name || index + 1}`} onClick={() => updateVariables(rows.filter((_, n) => n !== index))}>Remove</button></div>)}<div><button type="button" className="btn" disabled={busy} onClick={() => updateVariables([...rows, ["", ""]])}>Add variable</button></div><div className="small muted">Use {"{name}"} in tasks and commands. {"{task}"} is the task for this run.</div></div>
 				<div><button type="button" className="btn btn-ghost" disabled={busy} onClick={deleteWorkflow}>Delete workflow</button></div>
 			</>}
 			{!workflow && errors[""] && <div role="alert" className="tone-bad">{errors[""]}</div>}
 		</section>
+		{workflow && <EvalPanel key={workflow.id} workflow={workflow} server={props.server} busy={busy} show={(view) => {
+			if (!mounted.current) return;
+			setRuns((previous) => {
+				const next = { ...previous };
+				if (view) next[workflow.id] = view;
+				else delete next[workflow.id];
+				return next;
+			});
+		}} />}
 		{workflow && <>
 			{workflow.steps.length > 0 && <WorkflowGraph steps={workflow.steps} results={state?.steps ?? []} open={showStep} />}
 			<div className="wf-columns">

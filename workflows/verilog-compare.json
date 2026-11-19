@@ -1,0 +1,35 @@
+{
+	"id": "verilog-compare",
+	"name": "VerilogEval: harness against raw",
+	"task": "Read spec.md and write the module it describes to rtl/TopModule.sv. Compile it and fix every error.",
+	"vars": {
+		"design": "rtl/TopModule.sv"
+	},
+	"steps": [
+		{
+			"id": "agent",
+			"type": "agent",
+			"agent": "fpga",
+			"name": "Harness agent",
+			"task": "{task}",
+			"maxSeconds": 120
+		},
+		{
+			"id": "judge-harness",
+			"type": "judge",
+			"name": "Harness"
+		},
+		{
+			"id": "raw",
+			"type": "raw",
+			"name": "Raw model answer",
+			"file": "rtl/raw/TopModule.sv"
+		},
+		{
+			"id": "judge-raw",
+			"type": "judge",
+			"name": "Raw",
+			"file": "rtl/raw/TopModule.sv"
+		}
+	]
+}

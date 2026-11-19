@@ -4,6 +4,8 @@ import type {
 	AppConfig,
 	CreateSessionRequest,
 	CreateSessionResponse,
+	EvalProblems,
+	StartEvalRequest,
 	RunWorkflowRequest,
 	RunWorkflowResponse,
 	TreeNode,
@@ -54,6 +56,9 @@ export const api = {
 	resumeRun: (id: string, fromStepId?: string) => call<{ ok: true }>("POST", `/api/runs/${id}/resume`, { fromStepId }),
 	answerRun: (id: string, questionId: string, text: string) => call<{ ok: true }>("POST", `/api/runs/${id}/answer`, { questionId, text }),
 	stopRun: (id: string) => call<{ ok: true }>("POST", `/api/runs/${id}/stop`),
+	evalProblems: () => call<EvalProblems>("GET", "/api/verilog-eval/problems"),
+	startEval: (request: StartEvalRequest) => call<{ id: string }>("POST", "/api/verilog-eval/runs", request),
+	stopEval: (id: string) => call<{ ok: true }>("POST", `/api/verilog-eval/runs/${id}/stop`),
 };
 
 /**
@@ -68,3 +73,4 @@ export function listen<T>(url: string, onEvent: (event: T) => void): () => void 
 
 export const sessionEventsUrl = (id: string) => `/api/sessions/${id}/events`;
 export const runEventsUrl = (id: string) => `/api/runs/${id}/events`;
+export const evalEventsUrl = (id: string) => `/api/verilog-eval/runs/${id}/events`;

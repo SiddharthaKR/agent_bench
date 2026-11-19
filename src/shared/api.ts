@@ -165,7 +165,59 @@ export interface CommandStep extends StepBase {
 	timeoutSec?: number;
 }
 
-export type WorkflowStep = AgentStep | CommandStep;
+/** VerilogEval only: judges the design against the problem's hidden test. Never feeds back to the agent. */
+export interface JudgeStep extends StepBase {
+	type: "judge";
+	/** Design file to judge. Default {design}. */
+	file?: string;
+}
+
+/** VerilogEval only: one plain request with the benchmark's raw prompt; no tools, no retries. */
+export interface RawStep extends StepBase {
+	type: "raw";
+	/** Where the extracted code is written. Default {design}. */
+	file?: string;
+	model?: string;
+	maxSeconds?: number;
+}
+
+export type WorkflowStep = AgentStep | CommandStep | JudgeStep | RawStep;
+
+// ---------- VerilogEval runs ----------
+
+export interface EvalProblems { dev: string[]; heldout: string[] }
+
+export interface StartEvalRequest {
+	workflowId: string;
+	server: string;
+	problems: string[];
+	repeats?: number;
+}
+
+export type EvalProblemStatus = "waiting" | "running" | "done" | "stopped";
+
+export interface EvalProblemState {
+	/** Problem name, with " #n" for a repeat. */
+	key: string;
+	problem: string;
+	attempt: number;
+	status: EvalProblemStatus;
+	/** Verdict per judge step id. */
+	verdicts: Record<string, string>;
+	seconds: number;
+}
+
+export interface EvalRunState {
+	status: "running" | "done" | "stopped" | "failed";
+	folder: string;
+	judges: { id: string; name: string }[];
+	problems: EvalProblemState[];
+	error?: string;
+}
+
+export type EvalEvent =
+	| { type: "eval"; state: EvalRunState }
+	| { type: "problem"; key: string; event: WorkflowEvent };
 
 export interface Workflow {
 	protect?: string[];

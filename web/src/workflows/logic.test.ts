@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowStep } from "../../../src/shared/api.ts";
-import { commandToText, parseCommand, nextId, removeStep, countRuns, runStatus, stepStatus, applyRunEvent } from "./logic.ts";
+import { commandToText, parseCommand, nextId, removeStep, countRuns, runStatus, stepStatus, applyRunEvent, pickProblems, evalTotals, changeStepType, stepKind, stepDetail } from "./logic.ts";
 
 describe("workflow helpers", () => {
 	it("preserves quoted, empty and escaped command arguments", () => {
@@ -44,5 +44,26 @@ describe("workflow helpers", () => {
 		const progress = applyRunEvent(running, { type: "line", stepId: "a", text: "new progress" });
 		expect(progress.lines).toEqual({ a: "new progress" });
 		expect(finished.lines).toEqual({ a: "old progress" });
+	});
+});
+
+describe("VerilogEval helpers", () => {
+	it("picks problems for each choice", () => {
+		const problems = { dev: ["b"], heldout: ["c", "a"] };
+		expect(pickProblems(problems, "dev", [])).toEqual(["b"]);
+		expect(pickProblems(problems, "heldout", [])).toEqual(["c", "a"]);
+		expect(pickProblems(problems, "all", [])).toEqual(["a", "b", "c"]);
+		expect(pickProblems(problems, "pick", ["c", "b"])).toEqual(["b", "c"]);
+	});
+	it("totals passes per judge", () => {
+		const problem = (verdicts: Record<string, string>) => ({ key: "p", problem: "p", attempt: 1, status: "done" as const, verdicts, seconds: 1 });
+		expect(evalTotals({ status: "done", folder: "", judges: [{ id: "h", name: "Harness" }, { id: "r", name: "Raw" }], problems: [problem({ h: "PASS", r: "MISMATCH" }), problem({ h: "PASS" })] }))
+			.toEqual([{ id: "h", name: "Harness", pass: 2, judged: 2 }, { id: "r", name: "Raw", pass: 0, judged: 1 }]);
+	});
+	it("a judge made from another step has no 'if it fails'", () => {
+		const step = changeStepType({ id: "s", name: "S", type: "command", command: ["x"], onFail: { goTo: "s", maxRounds: 2 } }, "judge", "fpga");
+		expect(step).toEqual({ id: "s", name: "S", pause: undefined, once: undefined, type: "judge" });
+		expect(stepKind(step)).toBe("VerilogEval judge");
+		expect(stepDetail(step)).toBe("{design}");
 	});
 });

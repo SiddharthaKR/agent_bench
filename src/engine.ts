@@ -15,6 +15,8 @@ import type { Engine } from "./shared/engine.ts";
 import { realExec } from "./tools/index.ts";
 import type { CommandConfig, Exec } from "./types.ts";
 import { createWorkflowRun, prepareWorkflowSkills } from "./workflow.ts";
+import type { WorkflowDeps } from "./workflow.ts";
+import { createEvalRun, evalProblems } from "./eval-run.ts";
 
 export interface EngineOptions {
 	/** Folder holding config.json, agents/ and workflows/. */
@@ -116,14 +118,36 @@ export function createEngine(options: EngineOptions): Engine {
 			await rm(path.join(workflowsDir, `${id}.json`), { force: true });
 		},
 
+		async evalProblems() {
+			return evalProblems();
+		},
+
+		async createEvalRun(request) {
+			const { server, commands } = await pickServer(request.server);
+			const workflow = (await this.listWorkflows()).find((item) => item.id === request.workflowId);
+			if (!workflow) throw new Error(`There is no workflow named "${request.workflowId}".`);
+			const prepared = await prepareWorkflowSkills(workflow, undefined, agentDirOf);
+			return createEvalRun(randomUUID(), prepared, request.problems, request.repeats ?? 1, {
+				runsDir, server, serverId: request.server, commands,
+				makeRun: async (workspace, wired, task, runSpecial) => workflowRun(wired, task, workspace, server, commands, runSpecial),
+			});
+		},
+
 		async createWorkflowRun(request) {
 			const { server, commands } = await pickServer(request.server, request.model);
 			const workspace = await checkFolder(request.folder);
 			const workflow = await prepareWorkflowSkills(request.workflow, request.skills, agentDirOf);
-			return createWorkflowRun(randomUUID(), workflow, request.task, {
-				interactiveQuestions: true,
+			return workflowRun(workflow, request.task, workspace, server, commands);
+		},
+	};
+
+	function workflowRun(workflow: Workflow, task: string, workspace: string, server: ServerConfig, commands: CommandConfig, runSpecial?: WorkflowDeps["runSpecial"]) {
+			return createWorkflowRun(randomUUID(), workflow, task, {
+				// A VerilogEval run has nobody to answer questions.
+				interactiveQuestions: !runSpecial,
 				workspace,
 				exec,
+				runSpecial,
 				// Each agent step is a fresh run: its own context, its own trace.
 				runAgent: async (step, task, signal, onLine, onQuestion, questionBudget) => {
 					const result = await runAgent({
@@ -147,6 +171,5 @@ export function createEngine(options: EngineOptions): Engine {
 					return { ok: result.reason === "done", text: result.finalText || result.error || `The agent ended with: ${result.reason}.`, limit: result.reason === "time" ? "time" : result.reason === "limit" ? "turns" : undefined };
 				},
 			});
-		},
-	};
+	}
 }

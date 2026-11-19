@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataset = path.join(root, "external/verilog-eval/dataset_spec-to-rtl");
 const splitDir = path.join(root, "evals-external/verilog-eval");
-const task = "Read spec.md and write the module it describes to rtl/TopModule.sv. Compile it and fix every error.";
+export const task = "Read spec.md and write the module it describes to rtl/TopModule.sv. Compile it and fix every error.";
 
 function read(file) { return fs.readFileSync(file, "utf8"); }
 function json(file) { return JSON.parse(read(file)); }

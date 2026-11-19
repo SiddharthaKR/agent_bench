@@ -5,6 +5,9 @@
 import type {
 	AppConfig,
 	CreateSessionRequest,
+	EvalEvent,
+	EvalProblems,
+	StartEvalRequest,
 	RunWorkflowRequest,
 	SessionEvent,
 	Workflow,
@@ -42,7 +45,19 @@ export interface WorkflowRun {
 	stop(): void;
 }
 
+/** A workflow run over chosen VerilogEval problems. */
+export interface EvalRunHandle {
+	readonly id: string;
+	readonly events: readonly EvalEvent[];
+	subscribe(listener: (event: EvalEvent) => void): () => void;
+	start(): void;
+	stop(): void;
+}
+
 export interface Engine {
+	/** Missing when the benchmark is not set up. */
+	evalProblems?(): Promise<EvalProblems>;
+	createEvalRun?(request: StartEvalRequest): Promise<EvalRunHandle>;
 	config(): Promise<AppConfig>;
 	createSession(request: CreateSessionRequest): Promise<Session>;
 	listWorkflows(): Promise<Workflow[]>;

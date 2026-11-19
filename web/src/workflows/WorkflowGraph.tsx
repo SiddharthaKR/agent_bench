@@ -1,5 +1,5 @@
 import type { StepRun, WorkflowStep } from "../../../src/shared/api.ts";
-import { stepStatus } from "./logic.ts";
+import { stepDetail, stepStatus } from "./logic.ts";
 
 export function WorkflowGraph({ steps, results, open }: { steps: WorkflowStep[]; results: StepRun[]; open: (id: string) => void }) {
 	const arcs = steps.flatMap((step, index) => {
@@ -18,8 +18,8 @@ export function WorkflowGraph({ steps, results, open }: { steps: WorkflowStep[];
 					const word = stepStatus(status);
 					return <button type="button" className="btn btn-ghost wf-node" key={step.id} onClick={() => open(step.id)} aria-label={`Open step ${index + 1}: ${step.name}`}>
 						{index < steps.length - 1 && <span className={`wf-connector ${status === "passed" || status === "kept" ? "wf-connector-passed" : ""}`} />}
-						<span className={`wf-marker wf-marker-${step.type} wf-marker-${status}`}>{status === "passed" || status === "kept" ? "✓" : status === "failed" ? "!" : index + 1}</span>
-						<span className="wf-node-name">{step.name}</span><span className="small muted wf-ellipsis">{step.type === "agent" ? step.agent : step.command[0] || "No command"}</span>
+						<span className={`wf-marker wf-marker-${step.type === "agent" ? "agent" : "command"} wf-marker-${status}`}>{status === "passed" || status === "kept" ? "✓" : status === "failed" ? "!" : index + 1}</span>
+						<span className="wf-node-name">{step.name}</span><span className="small muted wf-ellipsis">{stepDetail(step)}</span>
 						{status !== "waiting" && <span className={`small wf-node-status ${word.tone}`}>{word.text}</span>}
 						{step.pause && <span className="small muted">pauses for me</span>}{step.once && <span className="small muted">runs once</span>}
 					</button>;

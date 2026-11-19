@@ -2,8 +2,8 @@ import { AgentStoreError, createAgent, deleteAgent, listAgentDetails, readAgentD
 import type { AgentUpdate } from "../shared/agents.ts";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import type { Engine, Session, WorkflowRun } from "../shared/engine.ts";
-import type { CreateSessionRequest, RunWorkflowRequest, Workflow } from "../shared/api.ts";
+import type { Engine, EvalRunHandle, Session, WorkflowRun } from "../shared/engine.ts";
+import type { CreateSessionRequest, RunWorkflowRequest, StartEvalRequest, Workflow } from "../shared/api.ts";
 import { projectFolder, readTree, readText, writeText, serveStatic } from "./files.ts";
 import { booleanField, HttpError, readJson, record, sendJson, stringField } from "./responses.ts";
 import { streamEvents } from "./sse.ts";
@@ -53,6 +53,7 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 	const hosts = new Set([...localHosts, ...(options.allowedHosts ?? []).map((host) => host.toLowerCase())]);
 	const sessions = new Map<string, Session>();
 	const runs = new Map<string, WorkflowRun>();
+	const evalRuns = new Map<string, EvalRunHandle>();
 	async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
 		checkSafety(request, hosts);
 		const rawUrl = request.url ?? "/";
@@ -171,6 +172,38 @@ export function createAppServer(engine: Engine, options: ServerOptions = {}): Se
 				if (body.id !== id) throw new HttpError(400, "Workflow id must match the URL id.");
 				await engine.saveWorkflow(body as unknown as Workflow);
 			}
+			return sendJson(response, { ok: true });
+		}
+		if (pathname === "/api/verilog-eval/problems") {
+			method(request, "GET");
+			if (!engine.evalProblems) throw new HttpError(400, "VerilogEval is not available in this app.");
+			try { return sendJson(response, await engine.evalProblems()); }
+			catch (error) { throw new HttpError(400, error instanceof Error ? error.message : String(error)); }
+		}
+		if (pathname === "/api/verilog-eval/runs") {
+			method(request, "POST");
+			if (!engine.createEvalRun) throw new HttpError(400, "VerilogEval is not available in this app.");
+			const body = record(await readJson(request));
+			const problems = Array.isArray(body.problems) && body.problems.every((name) => typeof name === "string") ? body.problems as string[] : undefined;
+			if (!problems) throw new HttpError(400, "Problems must be a list of names.");
+			if (body.repeats !== undefined && typeof body.repeats !== "number") throw new HttpError(400, "Repeats must be a number.");
+			const evalRequest: StartEvalRequest = { workflowId: stringField(body.workflowId, "Workflow id"), server: stringField(body.server, "Server"), problems, repeats: body.repeats as number | undefined };
+			let run: EvalRunHandle;
+			try { run = await engine.createEvalRun(evalRequest); }
+			catch (error) { throw new HttpError(400, error instanceof Error ? error.message : String(error)); }
+			evalRuns.set(run.id, run);
+			run.start();
+			return sendJson(response, { id: run.id });
+		}
+		const evalRoute = /^\/api\/verilog-eval\/runs\/([^/]+)\/(events|stop)$/.exec(pathname);
+		if (evalRoute) {
+			const [, id, action] = evalRoute;
+			method(request, action === "events" ? "GET" : "POST");
+			const run = evalRuns.get(id!);
+			if (!run) throw new HttpError(404, "No such run.");
+			if (action === "events") return streamEvents(response, run);
+			await readJson(request, true);
+			run.stop();
 			return sendJson(response, { ok: true });
 		}
 		if (pathname === "/api/runs") {

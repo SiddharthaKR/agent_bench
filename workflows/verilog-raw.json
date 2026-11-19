@@ -1,0 +1,20 @@
+{
+	"id": "verilog-raw",
+	"name": "VerilogEval: raw model",
+	"task": "Read spec.md and write the module it describes to rtl/TopModule.sv.",
+	"vars": {
+		"design": "rtl/TopModule.sv"
+	},
+	"steps": [
+		{
+			"id": "raw",
+			"type": "raw",
+			"name": "Raw model answer"
+		},
+		{
+			"id": "judge",
+			"type": "judge",
+			"name": "Raw"
+		}
+	]
+}

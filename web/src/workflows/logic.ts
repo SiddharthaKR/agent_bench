@@ -1,4 +1,4 @@
-import type { AgentStep, StepRun, StepRunStatus, Workflow, WorkflowEvent, WorkflowRunState, WorkflowStep } from "../../../src/shared/api.ts";
+import type { AgentStep, EvalRunState, StepRun, StepRunStatus, Workflow, WorkflowEvent, WorkflowRunState, WorkflowStep } from "../../../src/shared/api.ts";
 
 export interface RunView {
 	question?: Extract<WorkflowEvent, { type: "question" }>;
@@ -20,7 +20,7 @@ export function applyRunEvent(prior: RunView, event: WorkflowEvent): RunView {
 		if (result.status === "running" && (before?.status !== "running" || before.round !== result.round)) delete lines[result.stepId];
 		if (result.status !== "passed" && result.status !== "failed") continue;
 		const step = prior.workflow.steps.find((item) => item.id === result.stepId);
-		if (step?.type === "command" && (!before || before.status !== result.status || before.round !== result.round || before.text !== result.text || before.ms !== result.ms)) lastCommand = { name: step.name, result };
+		if (step && step.type !== "agent" && (!before || before.status !== result.status || before.round !== result.round || before.text !== result.text || before.ms !== result.ms)) lastCommand = { name: step.name, result };
 	}
 	return { ...prior, state: event.state, lines, lastCommand, question: event.state.status === "waiting" ? prior.question : undefined };
 }
@@ -77,7 +77,8 @@ export function countRuns(steps: readonly WorkflowStep[], results: readonly Step
 	for (const result of results) {
 		if (result.status !== "passed" && result.status !== "failed") continue;
 		const step = steps.find((item) => item.id === result.stepId);
-		if (step) counts[step.type]++;
+		if (step?.type === "agent") counts.agent++;
+		else if (step) counts.command++;
 	}
 	return counts;
 }
@@ -100,6 +101,28 @@ export function runStatus(state: WorkflowRunState | undefined, steps: readonly {
 	}
 }
 
+/** Short word for a step's kind, for cards and the graph. */
+export function stepKind(step: WorkflowStep): string {
+	return { agent: "Agent", command: "Command", judge: "VerilogEval judge", raw: "Raw model" }[step.type];
+}
+
+/** The second line under a step's name. */
+export function stepDetail(step: WorkflowStep): string {
+	if (step.type === "agent") return step.agent;
+	if (step.type === "command") return step.command[0] ? commandToText(step.command) : "No command";
+	return step.file ?? "{design}";
+}
+
+/** A blank step of the given type that keeps the shared fields. A judge has no onFail. */
+export function changeStepType(step: WorkflowStep, type: WorkflowStep["type"], agent: string): WorkflowStep {
+	const { id, name, onFail, pause, once } = step;
+	const base = { id, name, onFail, pause, once };
+	if (type === "agent") return { ...base, type, agent, task: "" };
+	if (type === "command") return { ...base, type, command: [], timeoutSec: 60 };
+	if (type === "raw") return { ...base, type };
+	return { id, name, pause, once, type };
+}
+
 export function setAgentSetting(step: AgentStep, key: "model" | "temperature" | "maxTurns", value: string): AgentStep {
 	const next = { ...step };
 	if (!value.trim()) delete next[key];
@@ -113,4 +136,20 @@ export function setStepTools(step: AgentStep, tools: string[]): AgentStep {
 	if (tools.length) next.tools = tools;
 	else delete next.tools;
 	return next;
+}
+
+/** Problems a VerilogEval run covers for a choice in the picker. */
+export function pickProblems(problems: { dev: string[]; heldout: string[] }, choice: "dev" | "heldout" | "all" | "pick", ticked: readonly string[]): string[] {
+	if (choice === "dev") return [...problems.dev];
+	if (choice === "heldout") return [...problems.heldout];
+	const all = [...problems.dev, ...problems.heldout].sort();
+	return choice === "all" ? all : all.filter((name) => ticked.includes(name));
+}
+
+/** Passes and judged problems per judge step. */
+export function evalTotals(state: EvalRunState): { id: string; name: string; pass: number; judged: number }[] {
+	return state.judges.map((judge) => {
+		const verdicts = state.problems.map((item) => item.verdicts[judge.id]).filter((verdict): verdict is string => !!verdict);
+		return { ...judge, pass: verdicts.filter((verdict) => verdict === "PASS").length, judged: verdicts.length };
+	});
 }

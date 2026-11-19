@@ -1,6 +1,6 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentStep, CommandStep, Workflow, WorkflowEvent, WorkflowRunState } from "./shared/api.ts";
+import type { AgentStep, CommandStep, JudgeStep, RawStep, Workflow, WorkflowEvent, WorkflowRunState } from "./shared/api.ts";
 import type { WorkflowRun } from "./shared/engine.ts";
 import { randomUUID } from "node:crypto";
 import type { Question } from "./types.ts";
@@ -34,6 +34,8 @@ export interface WorkflowDeps {
 	workspace: string;
 	exec: Exec;
 	/** Runs an agent with fresh context and reports one line per tool call. */
+	/** VerilogEval runs only: carries out judge and raw steps. Without it those steps fail. */
+	runSpecial?(step: JudgeStep | RawStep, vars: Record<string, string>, signal: AbortSignal): Promise<{ ok: boolean; text: string }>;
 	runAgent(step: AgentStep, task: string, signal: AbortSignal, onLine: (line: string) => void, onQuestion?: (question: Question) => Promise<string | undefined>, questionBudget?: { used: number }): Promise<{ ok: boolean; text: string; limit?: "time" | "turns" }>;
 }
 
@@ -62,8 +64,14 @@ export function validateWorkflow(workflow: Workflow): string[] {
 				if (settings.maxSeconds !== undefined && (!Number.isFinite(settings.maxSeconds) || settings.maxSeconds <= 0)) problems.push(`Step "${step.id}" needs a positive time limit.`);
 			}
 			if (step.tools !== undefined && step.tools.length === 0) problems.push(`Step "${step.id}" needs at least one tool.`);
-		} else if (!step.command.length || !step.command[0]?.trim()) {
-			problems.push(`Step "${step.id}" needs a command.`);
+		} else if (step.type === "command") {
+			if (!step.command.length || !step.command[0]?.trim()) problems.push(`Step "${step.id}" needs a command.`);
+		} else if (step.type === "judge") {
+			if (step.onFail) problems.push(`Step "${step.id}" is a VerilogEval judge; it never sends its result back, so it cannot have "if it fails".`);
+		} else if (step.type === "raw") {
+			if (step.maxSeconds !== undefined && (!Number.isFinite(step.maxSeconds) || step.maxSeconds <= 0)) problems.push(`Step "${step.id}" needs a positive time limit.`);
+		} else {
+			problems.push(`Step "${(step as { id: string }).id}" has an unknown type.`);
 		}
 		if (step.onFail) {
 			if (!seen.has(step.onFail.goTo)) problems.push(`Step "${step.id}" must go back to itself or an earlier step.`);
@@ -190,6 +198,8 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 					outcome = { ok: result.ok || checksDecide, text: result.text };
 					lastAgent.set(state.round, (outcome.text.split(/\r?\n/)[0] ?? "").slice(0, 160));
 					outcome = { ok: outcome.ok, text: outcome.text.slice(0, 600) };
+				} else if (step.type === "judge" || step.type === "raw") {
+					outcome = deps.runSpecial ? await deps.runSpecial(step, vars, owner.signal) : { ok: false, text: "Only in a VerilogEval run." };
 				} else {
 					if (!buildCreated) {
 						await mkdir(join(deps.workspace, ".build"), { recursive: true }).catch(() => {});
@@ -210,7 +220,9 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 			}
 			emitState();
 			if (!active(owner)) return;
-			if (outcome.ok) {
+			// In a VerilogEval run a verdict or a raw answer is a result, not a failure to act on: carry on.
+			const special = (step.type === "judge" || step.type === "raw") && deps.runSpecial !== undefined;
+			if (outcome.ok || special) {
 				if (step.pause && index < workflow.steps.length - 1) {
 					state.status = "paused";
 					state.current = workflow.steps[index + 1]!.id;
@@ -229,6 +241,12 @@ export function createWorkflowRun(id: string, workflow: Workflow, task: string, 
 					index = target;
 					waiting(index);
 					emitState();
+				} else if (deps.runSpecial) {
+					// A VerilogEval run has nobody to ask: carry on so the judge still scores what is there,
+					// as the scoring script does after an agent run ends.
+					state.log.push(`Round ${state.round}: step ${index + 1}, ${step.name}, failed. Carrying on to the next step.`);
+					emitState();
+					index++;
 				} else {
 					state.status = "failed";
 					state.log.push(`Round ${state.round}: step ${index + 1}, ${step.name}, failed. Stopped and waiting for you.`);
