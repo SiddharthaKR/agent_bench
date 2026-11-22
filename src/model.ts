@@ -18,7 +18,13 @@ export interface ServerConfig {
 	apiKey?: string;
 	/** Extra fields added to every chat request, for server-specific settings such as reasoning_effort. */
 	extra?: Record<string, unknown>;
+	/** Longest reply in tokens. A small model can otherwise write until the context is full. */
+	maxTokens?: number;
 }
+
+/** Default reply cap: a whole 150-line Verilog file fits; a runaway reply is cut after about two minutes at 20 tokens/s. */
+export const DEFAULT_MAX_TOKENS = 3000;
+export const CUT_OFF = "Your reply was cut off: it was too long. Do not explain or reason in the reply. Reply with only the one tool call, for example write_file with the complete file.";
 
 export interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -256,6 +262,7 @@ export function createStreamFn(options: StreamFnOptions): StreamFn {
 				stream_options: { include_usage: true },
 			};
 			if (options.server.temperature !== undefined) body.temperature = options.server.temperature;
+			body.max_tokens = options.server.maxTokens ?? DEFAULT_MAX_TOKENS;
 
 			let reply: Reply;
 			try {
@@ -288,7 +295,12 @@ export function createStreamFn(options: StreamFnOptions): StreamFn {
 			if (reasoning.trim()) content.push({ type: "thinking", thinking: reasoning.trim() });
 			let kind: string = parsed.kind;
 			let final = parsed.kind === "final";
-			if (parsed.kind === "final" && parsed.text === "") {
+			if (reply.finish === "length") {
+				// A cut-off reply is never acted on: a half-written file or call would do harm.
+				kind = "cut_off";
+				final = false;
+				content.push({ type: "toolCall", id: `call_${n}`, name: INVALID_CALL, arguments: { problem: CUT_OFF, raw: text.slice(0, 400) } });
+			} else if (parsed.kind === "final" && parsed.text === "") {
 				// An empty reply is never "finished": tell the model and let it try again.
 				kind = "empty";
 				final = false;
