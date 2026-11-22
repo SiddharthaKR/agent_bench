@@ -9,6 +9,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataset = path.join(root, "external/verilog-eval/dataset_spec-to-rtl");
 const splitDir = path.join(root, "evals-external/verilog-eval");
 export const task = "Read spec.md and write the module it describes to rtl/TopModule.sv. Compile it and fix every error.";
+// Optional given testbench (-b <dir>): <dir>/<problem>/tb_top.sv, written from the spec alone by another model. It only helps the agent; the judge is unchanged.
+export const givenTbTask = "\n\ntb/tb_top.sv is a testbench another engineer wrote from the same spec. Run it with run_sim and fix the design where a FAIL shows the design breaks the spec. The testbench can be wrong: if a check contradicts the spec, keep the design as the spec says. Never edit the testbench.";
 
 function read(file) { return fs.readFileSync(file, "utf8"); }
 function json(file) { return JSON.parse(read(file)); }
@@ -150,8 +152,8 @@ function collectWorkflowTraces(project, destination) {
 }
 
 function runOptions(argv) {
-	const options = { selection: argv[0], max: Infinity, server: "local", model: "", workflow: "", seconds: 120, skills: "", runs: 1 };
-	const keys = { "-n": "max", "-s": "server", "-m": "model", "-w": "workflow", "-t": "seconds", "-k": "skills", "-r": "runs" };
+	const options = { selection: argv[0], max: Infinity, server: "local", model: "", workflow: "", seconds: 120, skills: "", runs: 1, givenTb: "" };
+	const keys = { "-n": "max", "-s": "server", "-m": "model", "-w": "workflow", "-t": "seconds", "-k": "skills", "-r": "runs", "-b": "givenTb" };
 	if (!options.selection) throw new Error("Give dev, heldout, all, or a file with problem names.");
 	for (let i = 1; i < argv.length; i += 2) {
 		const key = keys[argv[i]];
@@ -200,7 +202,7 @@ async function run(argv) {
 	const cfg = config();
 	if (!cfg.servers[options.server]?.model) throw new Error(`Unknown server ${options.server}.`);
 	const model = options.model || cfg.servers[options.server].model;
-	const setup = (options.workflow ? `workflow ${path.basename(options.workflow, ".json")}` : "agent") + (options.skills ? ` +${options.skills}` : "");
+	const setup = (options.workflow ? `workflow ${path.basename(options.workflow, ".json")}` : "agent") + (options.skills ? ` +${options.skills}` : "") + (options.givenTb ? ` +tb:${path.basename(options.givenTb)}` : "");
 	const destination = path.join(root, "runs/verilog-eval", new Date().toISOString().replace(/[:.]/g, "-") + `-${process.pid}`);
 	fs.mkdirSync(destination, { recursive: true });
 	save(path.join(destination, "manifest.json"), { ...options, max: Number.isFinite(options.max) ? options.max : null, model, setup, commit: benchmarkRevision(), selected, splitRule: "Sorted positions 4, 8, 12, ... are dev." });
@@ -215,7 +217,10 @@ async function run(argv) {
 		try {
 			fs.copyFileSync(path.join(dataset, `${name}_prompt.txt`), path.join(project, "spec.md"));
 			fs.mkdirSync(path.join(project, "rtl"));
-			const args = [options.workflow ? "src/cli-workflow.ts" : "src/cli.ts", "--folder", project, "--server", options.server, "--max-seconds", String(options.seconds), "--protect", "spec.md", "--task", task];
+			const givenTb = options.givenTb && path.join(path.resolve(options.givenTb), name, "tb_top.sv");
+			const withTb = Boolean(givenTb && fs.existsSync(givenTb));
+			if (withTb) { fs.mkdirSync(path.join(project, "tb")); fs.copyFileSync(givenTb, path.join(project, "tb/tb_top.sv")); }
+			const args = [options.workflow ? "src/cli-workflow.ts" : "src/cli.ts", "--folder", project, "--server", options.server, "--max-seconds", String(options.seconds), "--protect", withTb ? "spec.md,tb/tb_top.sv" : "spec.md", "--task", withTb ? task + givenTbTask : task];
 			if (options.model) args.push("--model", options.model);
 			if (options.skills) args.push("--skills", options.skills);
 			if (options.workflow) args.push("--workflow", path.resolve(options.workflow), "--no-pause", "--var", "design=rtl/TopModule.sv", "--var", "tb=tb/tb_top.sv");
