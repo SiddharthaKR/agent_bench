@@ -18,7 +18,7 @@ unload() { ollama stop gemma4-12b-ctx16k > /dev/null 2>&1; ollama stop gemma4:12
 
 git -C "$tree" checkout -q --detach "$commit" || exit 2
 rm -rf "$parts"; mkdir -p "$parts"
-split -l "$chunk" -d "${LIST:-$here/evals-external/verilog-eval/$set_name.txt}" "$parts/part-"
+split -a 3 -l "$chunk" -d "${LIST:-$here/evals-external/verilog-eval/$set_name.txt}" "$parts/part-"
 echo "run $label at $(git -C "$tree" rev-parse --short HEAD), $set_name, chunks of $chunk, options: $*" > "$log"
 for part in "$parts"/part-*; do
 	unload
