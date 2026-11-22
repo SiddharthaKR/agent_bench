@@ -34,3 +34,20 @@ Held-out (117) is measured only at the end of a series, never read for tuning.
 - Correct RTL first, then speed. The testbench matters only when the task asks for one.
 - A Codex change is not kept until the type check, the tests and `scripts/check_evals.sh` pass and the number is re-measured here.
 - Simpler is better: a +1 that adds a hundred lines is a discard; equal score with less code is a keep.
+
+## Experiment queue (2026-11-22, owner asked for every category to be tried; keep only what scores)
+
+Order by expected gain; reorder after each failure analysis. Each is one A/B against the current best.
+
+1. V: several drafts, majority by simulation (`exp/V`); then V without the repair agent.
+2. Thinking: off / on / on only for the retry.
+3. Skills per failure group: Karnaugh map and truth table, FSM from a table, vector and bit order, cellular automata (rule90/110, conwaylife). Preloaded against chosen by the model.
+4. Tools: truth table to logic, state table to case statement, simulate with a printed trace of the design's outputs.
+5. Subagent: reviewer compares design with spec (retest of E4B's A on 12B).
+6. Spec-driven: spec to checklist (ports, behaviours, edge cases), RTL against it, checklist check at the end.
+7. Self-grill: the agent lists the spec's ambiguities, picks the literal reading, states assumptions, then writes.
+8. One-shot: one worked example per problem kind.
+9. Compaction or plan mode: only if traces show context overflow or lost track.
+10. Combinations of near-misses.
+
+Scoring: `bash scripts/ar_run.sh <label> <commit> -s local12 -t 300 [-w workflows/x.json]` (chunks of 8, model unloaded between chunks, waits for 3 GB free RAM).
