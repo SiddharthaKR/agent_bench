@@ -41,7 +41,7 @@ Each is one A/B against the current best. Reorder after each failure analysis.
 
 1. V: several drafts, majority by simulation (VRank-like, `exp/V`); then without the repair agent; then more drafts.
 2. V + arbitration: where the groups disagree, show the model the inputs and each group's outputs, and ask which matches the spec.
-3. Role separation (MAGE): a fresh-context checks writer (inputs and expected outputs from the spec, printed as a text waveform), separate from the RTL writer; candidates scored by those checks.
+3. Role separation (MAGE): a separate checks subagent, fresh context, writes inputs and expected outputs from the spec (printed as a text waveform) only to help the RTL agent choose or fix its design. RTL is the deliverable and the priority: the RTL agent never writes a testbench, the checks are never scored, and a disagreement between the checks and the design is a hint, never a block.
 4. Debug window on a mismatch: the cycles before the first mismatch as a table (MAGE, VerilogCoder tracing).
 5. Thinking: off / on / on only for the retry.
 6. Skills per failure group: Karnaugh map and truth table, FSM from a table, vector and bit order, cellular automata.
