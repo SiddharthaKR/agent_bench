@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # One autoresearch scoring run from the frozen worktree ../Harness-ar, in chunks to keep memory low.
 # Usage: bash scripts/ar_run.sh <label> <commit> [verilog_eval.sh options, e.g. -s local12 -t 300 -w workflows/x.json]
-# Env: SET=dev|heldout (default dev), CHUNK=8, MIN_GB=3, RAW=1 for the raw runner.
+# Env: SET=dev|heldout (default dev), LIST=<file> instead of SET, CHUNK=1, MIN_GB=3, RAW=1 for the raw runner.
 # Between chunks the model is unloaded (frees what the server leaks) and the next chunk waits until
 # at least MIN_GB of RAM is available. Writes runs/ar-<label>.log; the last lines are the totals.
 set -u
 label=$1; commit=$2; shift 2
-set_name=${SET:-dev}; chunk=${CHUNK:-8}; min_gb=${MIN_GB:-3}
+set_name=${SET:-dev}; chunk=${CHUNK:-1}; min_gb=${MIN_GB:-3}
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tree="$here/../Harness-ar"
 log="$here/runs/ar-$label.log"
@@ -18,7 +18,7 @@ unload() { ollama stop gemma4-12b-ctx16k > /dev/null 2>&1; ollama stop gemma4:12
 
 git -C "$tree" checkout -q --detach "$commit" || exit 2
 rm -rf "$parts"; mkdir -p "$parts"
-split -l "$chunk" -d "$here/evals-external/verilog-eval/$set_name.txt" "$parts/part-"
+split -l "$chunk" -d "${LIST:-$here/evals-external/verilog-eval/$set_name.txt}" "$parts/part-"
 echo "run $label at $(git -C "$tree" rev-parse --short HEAD), $set_name, chunks of $chunk, options: $*" > "$log"
 for part in "$parts"/part-*; do
 	unload
