@@ -27,7 +27,7 @@ Problems pass in some runs and fail in others: noise is being measured (baseline
 
 | Id | Idea | Source | Hypothesis | Status |
 |---|---|---|---|---|
-| Y | Agent writes; 2 sequential quick drafts cross-check; one retry with the disagreement table only when both drafts agree against the design | own, from V's failure | Catches misreadings (always_case2, q4k) at ~30 s cost; never overrides a design without two agreeing witnesses | running |
+| Y | Agent writes; 2 sequential quick drafts cross-check; retry with the disagreement table | own | discarded, 24, median 147 s: drafts cost ~90 s per problem |
 | noise | Baseline repeated | method | Gives the real keep bar for 12B | queued |
 | Z | run_sim shows a waveform table of the ports at the clock edges before the first failure | MAGE, VerilogCoder; q4k trace | Turns cold-tb's found bugs into fixes: the model sees "output 3 cycles early" | built on the kept base, queued with cold-tb |
 
