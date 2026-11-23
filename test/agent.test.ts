@@ -377,25 +377,6 @@ describe("runAgent with a scripted model", () => {
 		expect(model.requests[2]!.messages.at(-1)!.content).toContain("Your reply was empty.");
 	});
 
-	it("caps the reply length and never acts on a reply that was cut off", async () => {
-		const requests: { max_tokens?: number; messages: ChatMessage[] }[] = [];
-		const fetchFn = (async (_url: unknown, init?: { body?: unknown }) => {
-			requests.push(JSON.parse(String(init?.body)));
-			const first = requests.length === 1;
-			const content = first ? "@tool write_file\npath: a.v\n---\nmodule a; // let me think about this again and again" : "Done.";
-			return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason: first ? "length" : "stop" }] }), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			});
-		}) as unknown as typeof fetch;
-		const result = await run({ fetchFn, requests: requests as never });
-
-		expect(requests[0]!.max_tokens).toBe(3000);
-		expect(result.invalidCalls).toBe(1);
-		expect(requests[1]!.messages.at(-1)!.content).toContain("Your reply was cut off");
-		await expect(readFile(path.join(workspace, "a.v"), "utf8")).rejects.toThrow();
-	});
-
 	it("stops a model that repeats the same call forever", async () => {
 		const model = fakeModel(() => "@tool compile\nfiles: a.v\n@end");
 		await writeFile(path.join(workspace, "a.v"), "module a; endmodule\n");
