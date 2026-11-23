@@ -13,7 +13,12 @@ The method of `autoresearch/program.md` (Karpathy), applied to this harness. One
 
 Everything in the harness: `agents/` (prompts, skills), `workflows/`, `src/` (tools, hints, engine), new scripts that a workflow calls. Not the judge, not the benchmark, not the split.
 
-## Metric
+## Metric (owner, 2026-11-23: accuracy and industry standard first, then speed)
+
+Three numbers per run, in this order: (1) dev pass count; (2) designs that pass the quality gate (`npm run quality`: Icarus -Wall, Verilator lint and Yosys synthesis when installed, the harness's model-free checks); (3) median seconds. Keep an idea only if (1) rises, or (1) is equal and (2) or (3) improves, with none of the three worse beyond noise. A faster harness with worse accuracy or quality is a discard.
+Kept ideas are also checked on the industry track: the project's held-out tasks (`bash scripts/eval_set.sh heldout`) and the old harness's easy and medium tasks, with the full quality gate.
+
+## Dev pass count
 
 `dev pass count` of 39 VerilogEval dev problems, one run. Secondary: median seconds per problem, then simplicity.
 Measured noise on E4B: the same code scored 22 to 25. A change is **kept** only when it gains at least 3 problems, or is equal and simpler or faster. Gains of 1 or 2 are rerun once before keeping.
