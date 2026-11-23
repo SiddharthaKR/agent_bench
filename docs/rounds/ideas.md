@@ -53,6 +53,14 @@ Full quality gate now runs Verilator lint and Yosys synthesis (OSS CAD Suite in 
 13. **Coding-standard skill** (own). Short always-on rules for industry RTL: one clocked process per register group, explicit reset values from the spec, no initial blocks or delays in RTL, parameters for widths, registered outputs where the spec allows, named states. Measure on the industry track; keep only if accuracy does not drop.
 14. **Industry track baseline** (method). Run the project's held-out tasks and the old easy task once with the current best, with the full gate, so later ideas have a standards number to beat.
 
+## Run-to-run variation (owner question, 2026-11-23)
+
+Two baseline runs, same code: 25 pass both, 6 fail both, 4 flip (q4k, vector3, gatesv100, fsmseq). Causes: sampling at temperature 0.2 with no seed, runaway replies that use the whole budget, and problems close to the 300 s limit. Nothing in the harness checks the logic before the run ends, so a half-understood problem passes or fails by luck.
+
+15. **Temperature 0 and a fixed seed** (own). Server `local12-t0`. Two runs: do they give the same answers, and does the score change? Makes experiments comparable; does not make the model more right.
+16. **Check and retry for reliability** (own). Turning a lucky pass into a sure pass needs a logic check before the run ends (cold testbench with Z, spec example check, idea 5) plus retry on failure. A problem passed half the time becomes ~75% with two checked tries, ~87% with three.
+17. **Tighter reply cap, about 1500 tokens** (own, from X and the repeat: always_case2 timed out with 0 tool calls, muxdff with 1). X at 3000 tokens still allowed 190 s replies.
+
 Parked: one-shot examples, self-questioning of the spec, compaction or plan mode (no evidence; traces show no context overflow: contexts stay under 16k).
 
 ## How an idea moves
