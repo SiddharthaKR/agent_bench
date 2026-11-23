@@ -1,5 +1,15 @@
 # Handoff: where the work stands and what comes next
 
+## Autoresearch series nov22 with Gemma 4 12B (2026-11-22 to 11-23): read this first
+
+- Report: `docs/rounds/2026-11-23-autoresearch.md` (results, lessons, plan). Ideas and status: `docs/rounds/ideas.md`. Method: `briefs/autoresearch.md`.
+- Owner's goal for this series: one harness that scores fully on VerilogEval, with industry-standard RTL (accuracy and the lint/synthesis gate first), without taking long. RTL is the deliverable; tests only from a helper (cold testbench by Codex, never scored).
+- Best so far is still the unchanged harness: dev 28 and 29 of 39 with Gemma 4 12B (raw 12B: 21). Six ideas tried, none kept (V, W, X, Y, cold testbench, X + cold testbench).
+- Noise: 5 of 39 problems flip between identical runs; keep bar is mean baseline + 3 (31).
+- Built, checked, not scored: Z waveform table (`exp/Z2`), F fast start (`exp/F2`). The next session starts with these two runs; commands are in the report.
+- Start Claude Code with `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`; score with `scripts/ar_run.sh` (unloads the model after every problem to keep memory low).
+- Branch `autoresearch/nov22` is local, not pushed.
+
 ## Task Z result (2026-11-16, run by Codex, checked by Claude)
 
 - Noise on dev: the same harness code scored 22, 24, 25 of 39 (mean 23.7); raw 17 to 20 (mean 18.5). A change smaller than 3 problems is not evidence; yesterday's 27 was a lucky run.
