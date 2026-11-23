@@ -45,6 +45,14 @@ Problems pass in some runs and fail in others: noise is being measured (baseline
 10. **Separate checks subagent, local** (MAGE; owner wants the testbench as a helper only). Local 12B writes the checks in its own context. Only after Z shows whether the agent can use failures.
 11. **On-demand Codex checks** (owner). When stuck, ask Codex for checks of the failing case. After Z.
 
+## Industry standard (owner, 2026-11-23: accuracy and standard are as important as speed)
+
+Full quality gate now runs Verilator lint and Yosys synthesis (OSS CAD Suite in WSL via `scripts/wsl_tool.sh`). Baseline with the full gate: 33 of 35 designs clean; 26 of 39 problems correct and clean. VerilogEval's small modules rarely trip the gate, so standards are judged mainly on the industry track (project held-out tasks, old harness easy/medium).
+
+12. **Lint in the loop** (own). The agent's compile tool also runs Verilator and Yosys and returns the serious findings only (latch, width, multiple drivers, blocking in clocked block, non-synthesizable) as hints. A run may not end on a design Yosys cannot synthesize. Expect: quality up on the industry track; small accuracy gain where lint finds real bugs (width, drivers). Cost: one WSL call per compile (~2 to 5 s).
+13. **Coding-standard skill** (own). Short always-on rules for industry RTL: one clocked process per register group, explicit reset values from the spec, no initial blocks or delays in RTL, parameters for widths, registered outputs where the spec allows, named states. Measure on the industry track; keep only if accuracy does not drop.
+14. **Industry track baseline** (method). Run the project's held-out tasks and the old easy task once with the current best, with the full gate, so later ideas have a standards number to beat.
+
 Parked: one-shot examples, self-questioning of the spec, compaction or plan mode (no evidence; traces show no context overflow: contexts stay under 16k).
 
 ## How an idea moves
