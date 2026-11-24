@@ -85,9 +85,24 @@ tail -f runs/heldout.log
 | `runs/verilog-eval/<time>/` and `runs/verilog-eval-raw/<time>/` | Every problem's files and trace |
 | `runs/results.jsonl` | One line per problem run |
 
-To fill the deck, send the two `compare-*.txt` files.
+## 7. Numbers for the deck (slide 8)
 
-## 7. Common problems
+After the raw and the harness runs have finished:
+```bash
+node scripts/deck_numbers.mjs
+```
+It takes the newest raw and newest harness run and prints one line per slide 8 row: held-out and dev, raw and harness, with passed, compile errors, time-outs and median seconds. Type those numbers into the blank column of slide 8.
+
+For older runs, give the folders: `node scripts/deck_numbers.mjs <harness folder> <raw folder>`.
+
+Full dataset, raw and harness run separately, then the numbers:
+```bash
+bash scripts/server_run.sh all raw
+bash scripts/server_run.sh all harness
+node scripts/deck_numbers.mjs
+```
+
+## 8. Common problems
 
 | Message | Fix |
 |---|---|
