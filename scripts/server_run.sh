@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Score VerilogEval on the office server. Run scripts/server_setup.sh once first.
-# Edit the values below, then run from the repository root:  bash scripts/server_run.sh
+# Run from the repository root; see docs/usage.md for every case.
 set -uo pipefail
 
-# ---- Values to change ----
+# ---- Defaults (override with arguments, see docs/usage.md) ----
 SET="heldout"            # dev | heldout | all
 WHAT="both"              # raw | harness | both  (both also prints the comparison)
 REPEATS=3                # runs per problem; one run can swing by about 3 problems
@@ -11,6 +11,19 @@ SECONDS_PER_PROBLEM=120  # raise (e.g. 300) if you see many TIME verdicts
 LIMIT=""                 # number of problems for a quick try, e.g. 3; empty = all
 WORKFLOW=""              # harness only: e.g. workflows/fpga-fast.json; empty = plain agent
 # --------------------------
+# Usage: bash scripts/server_run.sh [dev|heldout|all] [raw|harness|both] [-r repeats] [-t seconds] [-n limit] [-w workflow]
+[ $# -gt 0 ] && case "$1" in dev|heldout|all) SET="$1"; shift;; esac
+[ $# -gt 0 ] && case "$1" in raw|harness|both) WHAT="$1"; shift;; esac
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-r) REPEATS="$2"; shift 2;;
+		-t) SECONDS_PER_PROBLEM="$2"; shift 2;;
+		-n) LIMIT="$2"; shift 2;;
+		-w) WORKFLOW="$2"; shift 2;;
+		*) echo "Unknown argument: $1. Usage: bash scripts/server_run.sh [dev|heldout|all] [raw|harness|both] [-r N] [-t S] [-n N] [-w file]"; exit 2;;
+	esac
+done
+echo "Set: $SET, what: $WHAT, repeats: $REPEATS, seconds per problem: $SECONDS_PER_PROBLEM${LIMIT:+, first $LIMIT problems}${WORKFLOW:+, workflow $WORKFLOW}"
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 [ -f config.local.json ] || { echo "Run scripts/server_setup.sh first."; exit 2; }
