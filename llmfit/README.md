@@ -8,6 +8,9 @@ Check which local LLMs fit your machine, all in one place. It works on **macOS (
 - **Installed models**: scans LM Studio, Ollama, llama.cpp, the Hugging Face cache and any folder you name. It reads GGUF headers and `config.json` directly.
 - **Already-running models**: finds models loaded right now in Ollama, LM Studio, llama.cpp server or any OpenAI-compatible server (vLLM, SGLang, mlx_lm.server), plus LLM processes using GPU or RAM, and subtracts that memory from your budget. You can also check remote servers with `--endpoint`.
 - **Parallel requests**: `--parallel N` gives every model N KV caches, one per concurrent request. The HTML report has a live "parallel" box to change this.
+- **GPU vs CPU placement**: for every selected or running model it shows how many GB and layers sit on the GPU and how many spill to CPU RAM, with bars and a memory map of the whole GPU (or unified memory).
+- **Live view (`--watch`)**: a `top`-style dashboard with GPU utilization, memory, CPU, RAM, each running model's GPU|CPU split, and live tokens/s, prompt tokens/s, running and waiting requests and KV cache %.
+- **Benchmark (`--bench`)**: sends one short request to each running model and reports time to first token, prefill and decode tokens/s.
 - **KV cache estimate** for your context length. It handles GQA, MLA (DeepSeek/GLM/Mistral 4), sliding-window and hybrid linear-attention models.
 - **Fit check**: each model is marked `FIT` / `TIGHT` / `OFFLOAD` / `NO`. You can **select several models** to see whether they fit together.
 - **One-page HTML report** with checkboxes, a live memory bar, sorting and filters.
@@ -81,6 +84,31 @@ sudo sysctl iogpu.wired_limit_mb=230000   # 256 GB Mac example
 - `query`: text used to find the quantized build (MLX: mlx-community / lmstudio-community; GGUF: unsloth / bartowski / lmstudio-community / ggml-org)
 - `base`: official repo, used for params, config and license
 - optional `params_b` / `active_b` to override params with vendor numbers
+
+## Live view and benchmark
+
+```bash
+python3 llmfit.py --watch            # refresh every 2 s, Ctrl-C to quit
+python3 llmfit.py --watch 1 --endpoint http://192.168.1.126:1234
+python3 llmfit.py --bench            # TTFT / prefill / decode tok/s for each running model
+```
+
+| Data | macOS (no sudo) | Linux |
+|---|---|---|
+| GPU utilization, memory | `ioreg` (IOAccelerator) | `nvidia-smi` (+ power, temperature) |
+| CPU, RAM | load average, `vm_stat` | `/proc/stat`, `/proc/meminfo` |
+| Live tokens/s, requests, KV % | from `/metrics`: llama.cpp server (start with `--metrics`), vLLM, SGLang | same |
+| Ollama / LM Studio speed | no metrics endpoint, so use `--bench` | same |
+
+## GPU / CPU placement
+
+When you select models (`--select 2,3` or in the picker), they are placed in the order you choose. Each one fills the free GPU memory first, then its remaining layers go to CPU RAM. You get:
+
+- one row per model: GB on GPU, GB on CPU, layers on GPU (e.g. `31/48`) and a `█ GPU ▒ CPU` bar
+- a memory map of the GPU showing running models, each selected model and free space
+- a tip for MoE models: offloading **experts** (`llama.cpp --n-cpu-moe N` or `-ot exps=CPU`) is much faster than offloading whole layers
+
+On Apple Silicon, CPU and GPU share one memory pool, so everything runs on the GPU. Going over the limit means macOS swaps, which is very slow. For running Ollama models the real split comes from Ollama itself (`size_vram`).
 
 ## Already-running models
 

@@ -197,7 +197,9 @@ def detect_running(endpoints, os_name):
         if isinstance(ps, dict) and "models" in ps:
             for m in ps["models"]:
                 found.append({"server": f"ollama {ep}", "model": m.get("name"),
-                              "bytes": m.get("size_vram") or m.get("size"), "ctx": m.get("context_length")})
+                              "bytes": m.get("size"), "gpu": m.get("size_vram"),
+                              "cpu": max(0, (m.get("size") or 0) - (m.get("size_vram") or 0)),
+                              "ctx": m.get("context_length")})
             continue
         lm = http_json(f"{ep}/api/v0/models")  # LM Studio
         if isinstance(lm, dict) and isinstance(lm.get("data"), list) and any("state" in x for x in lm["data"]):
@@ -245,7 +247,10 @@ def detect_running(endpoints, os_name):
 
 def apply_running(s, found, procs, endpoints):
     """Subtract memory already in use by local servers from the budget."""
-    local_model_bytes = sum(f["bytes"] or 0 for f in found if any(h in f["server"] for h in ("127.0.0.1", "localhost")))
+    local = [f for f in found if any(h in f["server"] for h in ("127.0.0.1", "localhost"))]
+    # unified memory: everything counts; discrete GPU: only the part in VRAM uses the GPU budget
+    local_model_bytes = sum((f["bytes"] or 0) if s["unified"] or s["os"] == "Darwin" or f.get("gpu") is None
+                            else (f.get("gpu") or 0) for f in local)
     proc_bytes = sum(p["bytes"] for p in procs)
     in_use = max(local_model_bytes, proc_bytes)  # avoid double counting
     s["budget_total"] = s["budget"]
@@ -265,12 +270,240 @@ def print_running(found, procs, s):
         if f.get("slots"):
             extra += f"  slots {f['slots']}"
         print(f"  {f['server']:<36} {str(f['model'])[:44]:<44} {gb(f['bytes']):>7} GB{extra}")
+        if f.get("gpu") is not None and f.get("bytes") and not s["unified"]:
+            pct = f["gpu"] / f["bytes"] * 100
+            print(f"  {'':<36} GPU {gb(f['gpu'])} GB | CPU {gb(f['cpu'])} GB  "
+                  f"{split_bar(f['gpu'], f['cpu'], 24)} {pct:.0f}% on GPU")
     for p in procs:
         print(f"  {p['kind']} pid {p['pid']:<8} {p['name'][:58]:<58} {gb(p['bytes']):>7} GB")
     if s.get("in_use"):
         print(f"  In use: {c(gb(s['in_use']) + ' GB', YELLOW)} -> free budget now "
               f"{c(gb(s['budget']) + ' GB', BOLD)} (of {gb(s['budget_total'])} GB)")
     print()
+
+
+# ----------------------------------------------------------------------------- live view + benchmark
+def prom(url):
+    """Parse a Prometheus /metrics page into {metric_name: summed value}."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": f"llmfit/{VERSION}"})
+        with urllib.request.urlopen(req, timeout=1.5) as r:
+            txt = r.read().decode("utf-8", "replace")
+    except Exception:
+        return None
+    out = {}
+    for line in txt.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"([a-zA-Z_:][\w:]*)(\{[^}]*\})?\s+([-+0-9.eEinfNa]+)", line)
+        if m:
+            try:
+                out[m.group(1)] = out.get(m.group(1), 0.0) + float(m.group(3))
+            except ValueError:
+                pass
+    return out
+
+
+def server_metrics(ep):
+    """Throughput counters from llama.cpp (--metrics), vLLM and SGLang."""
+    m = prom(ep.rstrip("/") + "/metrics")
+    if not m:
+        return None
+    pick = lambda *ks: next((m[k] for k in ks if k in m), None)
+    return {"gen_total": pick("vllm:generation_tokens_total", "llamacpp:tokens_predicted_total",
+                              "sglang:generation_tokens_total"),
+            "prompt_total": pick("vllm:prompt_tokens_total", "llamacpp:prompt_tokens_total",
+                                 "sglang:prompt_tokens_total"),
+            "running": pick("vllm:num_requests_running", "llamacpp:requests_processing", "sglang:num_running_reqs"),
+            "waiting": pick("vllm:num_requests_waiting", "llamacpp:requests_deferred", "sglang:num_queue_reqs"),
+            "kv_pct": pick("vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc", "llamacpp:kv_cache_usage_ratio",
+                           "sglang:token_usage")}
+
+
+def sys_stats(os_name, prev):
+    """GPU utilisation / memory, CPU load and RAM, without sudo."""
+    st = {"gpus": [], "cpu": None, "ram_used": None, "ram_total": None}
+    if os_name == "Darwin":
+        out = run(["ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"])
+        u = re.search(r'"Device Utilization %"=(\d+)', out)
+        mem = re.search(r'"In use system memory"=(\d+)', out)
+        st["gpus"].append({"name": "Apple GPU", "util": int(u.group(1)) if u else None,
+                           "used": int(mem.group(1)) if mem else None, "total": None})
+        vm = run(["vm_stat"])
+        ps = re.search(r"page size of (\d+)", vm)
+        page = int(ps.group(1)) if ps else 16384
+        pages = {k: int(v) for k, v in re.findall(r'Pages ([\w ]+?):\s+(\d+)', vm)}
+        used = sum(pages.get(k, 0) for k in ("active", "wired down", "occupied by compressor")) * page
+        st["ram_used"] = used
+        st["ram_total"] = int(run(["sysctl", "-n", "hw.memsize"]) or 0)
+        la = os.getloadavg()[0]
+        st["cpu"] = min(100.0, la / (os.cpu_count() or 1) * 100)
+    else:
+        if shutil.which("nvidia-smi"):
+            out = run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,power.draw,"
+                       "temperature.gpu", "--format=csv,noheader,nounits"])
+            for line in out.splitlines():
+                p = [x.strip() for x in line.split(",")]
+                if len(p) >= 4:
+                    f = lambda x: float(x) if x.replace(".", "", 1).isdigit() else None
+                    st["gpus"].append({"name": p[0], "util": f(p[1]), "used": (f(p[2]) or 0) * 1024 ** 2,
+                                       "total": (f(p[3]) or 0) * 1024 ** 2,
+                                       "power": f(p[4]) if len(p) > 4 else None,
+                                       "temp": f(p[5]) if len(p) > 5 else None})
+        try:
+            mi = {l.split(":")[0]: int(l.split()[1]) * 1024 for l in open("/proc/meminfo")}
+            st["ram_total"] = mi.get("MemTotal")
+            st["ram_used"] = mi.get("MemTotal", 0) - mi.get("MemAvailable", 0)
+            vals = [int(x) for x in open("/proc/stat").readline().split()[1:]]
+            idle, total = vals[3] + vals[4], sum(vals)
+            if prev.get("cpu"):
+                di, dt = idle - prev["cpu"][0], total - prev["cpu"][1]
+                st["cpu"] = 100 * (1 - di / dt) if dt else None
+            prev["cpu"] = (idle, total)
+        except OSError:
+            pass
+    return st
+
+
+def gauge(v, total, width=28, warn=0.8, crit=0.95):
+    if not total or v is None:
+        return c("?" * 0 + "·" * width, DIM)
+    f = max(0.0, min(1.0, v / total))
+    k = int(round(width * f))
+    col = GREEN if f < warn else YELLOW if f < crit else RED
+    return c("█" * k, col) + c("·" * (width - k), DIM)
+
+
+def watch(args, s):
+    eps = DEFAULT_ENDPOINTS + args.endpoint
+    prev, last = {}, {}
+    interval = max(0.5, args.watch)
+    try:
+        while True:
+            t0 = time.time()
+            st = sys_stats(s["os"], prev)
+            found, procs = detect_running(eps, s["os"])
+            lines = [c(f"llmfit live  |  {time.strftime('%H:%M:%S')}  |  every {interval:g}s  |  Ctrl-C to quit", BOLD), ""]
+            for gp in st["gpus"]:
+                tot = gp.get("total") or s.get("budget_total") or s["budget"]
+                util = gp.get("util")
+                lines.append(f"  {gp['name'][:22]:<22} util {gauge(util, 100)} {util if util is not None else '?':>4}%"
+                             + (f"   {gp['power']:.0f} W" if gp.get("power") else "")
+                             + (f"  {gp['temp']:.0f}°C" if gp.get("temp") else ""))
+                if gp.get("used") is not None:
+                    lines.append(f"  {'memory':<22}      {gauge(gp['used'], tot)} {gb(gp['used']):>5} / {gb(tot)} GB")
+            if st["cpu"] is not None:
+                lines.append(f"  {'CPU':<22} load {gauge(st['cpu'], 100)} {st['cpu']:>4.0f}%")
+            if st["ram_used"] is not None:
+                lines.append(f"  {'RAM':<22}      {gauge(st['ram_used'], st['ram_total'])} "
+                             f"{gb(st['ram_used']):>5} / {gb(st['ram_total'])} GB")
+            lines += ["", c(f"  {'server':<30} {'model':<34} {'size':>7}  {'GPU|CPU':<22} {'tok/s':>7} {'prompt/s':>8}"
+                            f" {'run':>4} {'wait':>4} {'KV%':>5}", DIM)]
+            if not found:
+                lines.append(c("  no running models detected", DIM))
+            seen_ep = set()
+            for f in found:
+                ep = f["server"].split()[-1]
+                met = server_metrics(ep) if ep not in seen_ep else None
+                seen_ep.add(ep)
+                tps = pps = None
+                if met:
+                    now = time.time()
+                    if ep in last and met.get("gen_total") is not None:
+                        dt = now - last[ep]["t"]
+                        tps = (met["gen_total"] - (last[ep]["gen_total"] or 0)) / dt if dt else None
+                        if met.get("prompt_total") is not None:
+                            pps = (met["prompt_total"] - (last[ep]["prompt_total"] or 0)) / dt if dt else None
+                    last[ep] = {"t": now, **met}
+                gpu, cpu = f.get("gpu"), f.get("cpu")
+                split = (split_bar(gpu, cpu or 0, 14) + f" {gpu / (gpu + (cpu or 0)) * 100:3.0f}%") if gpu else \
+                    c("unified" if s["os"] == "Darwin" else "?", DIM).ljust(22)
+                fmtn = lambda v, d=0: "-" if v is None else f"{v:.{d}f}"
+                lines.append(f"  {f['server'][:30]:<30} {str(f['model'])[:34]:<34} {gb(f['bytes']):>7}  {split:<22} "
+                             f"{fmtn(tps, 1):>7} {fmtn(pps):>8} {fmtn(met and met.get('running')):>4} "
+                             f"{fmtn(met and met.get('waiting')):>4} "
+                             f"{fmtn(met and met.get('kv_pct') is not None and met['kv_pct'] * 100):>5}")
+            if procs:
+                lines += ["", c("  processes", DIM)]
+                for p in procs:
+                    lines.append(f"  {p['kind']} pid {p['pid']:<8} {p['name'][:40]:<40} {gb(p['bytes']):>7} GB")
+            lines += ["", c("  tok/s needs a metrics endpoint: llama-server --metrics, vLLM and SGLang have it by default. "
+                            "Ollama / LM Studio: use --bench.", DIM)]
+            sys.stdout.write("\033[2J\033[H" + "\n".join(lines) + "\n")
+            sys.stdout.flush()
+            if args.watch_once:
+                return
+            time.sleep(max(0.1, interval - (time.time() - t0)))
+    except KeyboardInterrupt:
+        print()
+
+
+def bench_one(f, prompt, max_tokens):
+    """Measure TTFT and decode speed of a running model with one short request."""
+    ep = f["server"].split()[-1].rstrip("/")
+    model = f["model"]
+    if f["server"].startswith("ollama"):
+        body = json.dumps({"model": model, "prompt": prompt, "stream": False,
+                           "options": {"num_predict": max_tokens}}).encode()
+        try:
+            req = urllib.request.Request(ep + "/api/generate", data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=300) as r:
+                d = json.loads(r.read())
+            ns = 1e9
+            return {"ttft": (d.get("load_duration", 0) + d.get("prompt_eval_duration", 0)) / ns,
+                    "prefill": d.get("prompt_eval_count", 0) / (d.get("prompt_eval_duration", 1) / ns),
+                    "decode": d.get("eval_count", 0) / (d.get("eval_duration", 1) / ns),
+                    "tokens": d.get("eval_count")}
+        except Exception as e:
+            return {"error": str(e)[:60]}
+    body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}],
+                       "max_tokens": max_tokens, "stream": True, "temperature": 0}).encode()
+    try:
+        req = urllib.request.Request(ep + "/v1/chat/completions", data=body,
+                                     headers={"Content-Type": "application/json"})
+        t0 = time.time()
+        first = None
+        n = 0
+        with urllib.request.urlopen(req, timeout=300) as r:
+            for raw in r:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:") or line.endswith("[DONE]"):
+                    continue
+                try:
+                    ch = json.loads(line[5:])["choices"][0].get("delta", {})
+                except Exception:
+                    continue
+                if ch.get("content") or ch.get("reasoning_content") or ch.get("reasoning"):
+                    n += 1
+                    if first is None:
+                        first = time.time()
+        end = time.time()
+        if first is None:
+            return {"error": "no tokens returned"}
+        return {"ttft": first - t0, "decode": (n - 1) / (end - first) if n > 1 and end > first else None,
+                "prefill": None, "tokens": n}
+    except Exception as e:
+        return {"error": str(e)[:60]}
+
+
+def bench(args, s):
+    found, _ = detect_running(DEFAULT_ENDPOINTS + args.endpoint, s["os"])
+    if not found:
+        print("No running models found to benchmark.")
+        return
+    prompt = ("Write a short Verilog module for a 4-bit up counter with synchronous reset, "
+              "then explain it in two sentences.")
+    print(c(f"== Benchmark ({args.bench} tokens each, one request at a time) ==", BOLD))
+    print(c(f"  {'server':<30} {'model':<36} {'TTFT s':>7} {'prefill t/s':>11} {'decode t/s':>10} {'tokens':>6}", DIM))
+    for f in found:
+        r = bench_one(f, prompt, args.bench)
+        if r.get("error"):
+            print(f"  {f['server'][:30]:<30} {str(f['model'])[:36]:<36} " + c(r["error"], RED))
+            continue
+        fm = lambda v, d: "-" if v is None else f"{v:.{d}f}"
+        print(f"  {f['server'][:30]:<30} {str(f['model'])[:36]:<36} {fm(r['ttft'], 2):>7} {fm(r['prefill'], 0):>11} "
+              f"{fm(r['decode'], 1):>10} {fm(r['tokens'], 0):>6}")
+    print(c("  TTFT includes model load time if the model was not in memory yet.", DIM))
 
 # ----------------------------------------------------------------------------- HF client + cache
 class HFClient:
@@ -804,6 +1037,77 @@ def scan_local(dirs, ctx, kv_bits):
     return rows
 
 
+
+# ----------------------------------------------------------------------------- GPU / CPU placement map
+SEG_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+SEG_COLORS = ["36", "35", "34", "32", "33", "96", "95", "94", "92", "93"]
+
+
+def place(rows_sel, s, overhead_gb):
+    """Greedy layer placement in selection order: fill free GPU memory, spill remaining layers to CPU RAM.
+    Unified memory (Apple Silicon): CPU and GPU share one pool, everything runs on the GPU (Metal)."""
+    unified = s["unified"] or s["os"] == "Darwin"
+    gpu_left = s["budget"]
+    cpu_left = int(s["ram"] * 0.8) if not unified else 0
+    out = []
+    for r in rows_sel:
+        n = need(r, overhead_gb) or 0
+        L = int(r.get("layers") or 1)
+        fixed = int(overhead_gb * GB)
+        per = max(1, (n - fixed) / L)
+        if n <= gpu_left:
+            gpu, lg = n, L
+        elif unified:
+            gpu, lg = n, L  # does not fit; macOS would swap/compress, reported as over budget
+        else:
+            lg = max(0, min(L, int((gpu_left - fixed) / per))) if gpu_left > fixed else 0
+            gpu = fixed + int(lg * per) if lg else 0
+        cpu = n - gpu
+        gpu_left -= gpu
+        cpu_left -= cpu
+        out.append({"row": r, "need": n, "gpu": gpu, "cpu": cpu, "layers": L, "layers_gpu": lg,
+                    "over_gpu": gpu_left < 0, "over_cpu": cpu_left < 0})
+    return out
+
+
+def split_bar(gpu, cpu, width=30):
+    tot = gpu + cpu
+    if not tot:
+        return ""
+    g = int(round(width * gpu / tot))
+    return c("█" * g, GREEN) + c("▒" * (width - g), YELLOW)
+
+
+def memory_map(s, segs, width=60):
+    """One bar for the GPU / unified pool: running models, selected models, free."""
+    total = s.get("budget_total") or s["budget"]
+    if not total:
+        return
+    bar, legend, used = "", [], 0
+    if s.get("in_use"):
+        k = max(1, int(width * s["in_use"] / total))
+        bar += c("▓" * k, DIM)
+        used += k
+        legend.append(c("▓", DIM) + f" running {gb(s['in_use'])} GB")
+    for i, sg in enumerate(segs):
+        k = int(round(width * sg["gpu"] / total))
+        if sg["gpu"] and k == 0:
+            k = 1
+        ch, col = SEG_CHARS[i % 26], SEG_COLORS[i % len(SEG_COLORS)]
+        bar += c(ch * k, col)
+        used += k
+        legend.append(c(ch, col) + f" {sg['row']['name'][:26]} {gb(sg['gpu'])} GB")
+    over = used > width
+    if over:
+        bar = bar  # overflow shown by the length past the frame
+    else:
+        bar += "·" * (width - used)
+    label = "Unified memory (GPU)" if (s["unified"] or s["os"] == "Darwin") else "GPU VRAM"
+    print(f"  {label} {gb(total)} GB")
+    print("  |" + bar + "|" + (c("  OVER", RED) if over else ""))
+    for i in range(0, len(legend), 3):
+        print("   " + "   ".join(legend[i:i + 3]))
+
 # ----------------------------------------------------------------------------- fit logic + table
 def need(row, overhead_gb):
     if not row.get("size"):
@@ -866,24 +1170,40 @@ def print_table(rows, s, overhead_gb, wide=False):
 
 
 def show_selection(rows, idx, s, overhead_gb):
-    tot = 0
-    print(c("\n== Selection ==", BOLD))
-    for i in idx:
-        r = rows[i]
-        n = need(r, overhead_gb) or 0
-        tot += n
-        print(f"  {i + 1:>3}. {r['name'][:46]:<46} {gb(n):>7} GB")
-    pct = tot / s["budget"] * 100 if s["budget"] else 0
-    bar_len = 40
-    filled = min(bar_len, int(bar_len * pct / 100))
-    col = GREEN if pct <= 85 else YELLOW if pct <= 100 else RED
-    print(f"  {'Total':<51} {gb(tot):>7} GB  of {gb(s['budget'])} GB budget")
-    print("  [" + c("#" * filled, col) + "." * (bar_len - filled) + f"] {pct:.0f}%")
-    lab, plain = fit_label(tot, s)
-    left = s["budget"] - tot
-    msg = {"FIT": f"fits together, {gb(left)} GB left for longer context / other apps",
-           "TIGHT": f"fits but tight ({gb(left)} GB left), keep context short",
-           "OFFLOAD": "only fits with CPU offload (slow)", "NO": f"does not fit, over by {gb(-left)} GB"}[plain]
+    segs = place([rows[i] for i in idx], s, overhead_gb)
+    unified = s["unified"] or s["os"] == "Darwin"
+    print(c("\n== Selection: where each model lives ==", BOLD))
+    hdr = "GPU" if not unified else "GPU (unified)"
+    print(c(f"  {'#':>3}  {'Model':<34} {'Need':>7}  {hdr:<13} {'CPU':>7}   layers on GPU   " +
+            ("[" + c("█", GREEN) + " GPU " + c("▒", YELLOW) + " CPU]" if not unified else ""), DIM))
+    for i, sg in zip(idx, segs):
+        r = sg["row"]
+        lay = f"{sg['layers_gpu']}/{sg['layers']}"
+        print(f"  {i + 1:>3}  {r['name'][:34]:<34} {gb(sg['need']):>7}  {gb(sg['gpu']):>7} GB    {gb(sg['cpu']):>7}   "
+              f"{lay:>9}       {split_bar(sg['gpu'], sg['cpu']) if not unified else ''}")
+        if sg["cpu"] and r.get("moe"):
+            print(c("        tip: MoE - offload experts instead of whole layers "
+                    "(llama.cpp --n-cpu-moe N / -ot exps=CPU) to keep attention on GPU", DIM))
+    print()
+    memory_map(s, segs)
+    tot = sum(sg["need"] for sg in segs)
+    gpu = sum(sg["gpu"] for sg in segs)
+    cpu = sum(sg["cpu"] for sg in segs)
+    left = s["budget"] - gpu
+    print()
+    if unified:
+        lab, plain = fit_label(tot, s)
+        msg = {"FIT": f"fits, {gb(left)} GB free for longer context / more parallel requests",
+               "TIGHT": f"fits but tight ({gb(left)} GB free), keep context short",
+               "NO": f"over by {gb(-left)} GB - macOS will swap (very slow)", "OFFLOAD": ""}[plain]
+    elif cpu == 0:
+        lab, plain = fit_label(tot, s)
+        msg = f"all on GPU, {gb(left)} GB VRAM free"
+    elif segs and segs[-1]["over_cpu"]:
+        lab, msg = c("NO", RED), f"needs {gb(cpu)} GB of CPU RAM for offload - not enough RAM"
+    else:
+        lab, msg = c("OFFLOAD", YELLOW), (f"{gb(gpu)} GB on GPU + {gb(cpu)} GB on CPU RAM - runs, "
+                                         f"but CPU layers are much slower")
     print(f"  => {lab}: {msg}\n")
 
 
@@ -1030,6 +1350,11 @@ def main():
                     help="don't subtract models already loaded / running from the budget")
     ap.add_argument("--endpoint", action="append", default=[],
                     help="extra server to check for loaded models, e.g. http://192.168.1.126:1234 (repeatable)")
+    ap.add_argument("--watch", type=float, nargs="?", const=2.0, metavar="SEC",
+                    help="live dashboard: GPU/CPU/RAM, running models, GPU|CPU split, tok/s (default every 2 s)")
+    ap.add_argument("--watch-once", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--bench", type=int, nargs="?", const=128, metavar="TOKENS",
+                    help="benchmark every running model: TTFT, prefill and decode tokens/s (default 128 tokens)")
     ap.add_argument("--overhead", type=float, default=1.0, help="runtime overhead per model in GB (default 1.0)")
     ap.add_argument("--role", help="only catalog models with this role (coding, rag, reasoning, ...)")
     ap.add_argument("--filter", help="only models whose name contains this text")
@@ -1058,6 +1383,10 @@ def main():
     args = ap.parse_args()
 
     s = override_specs(detect_specs(), args)
+    if args.watch is not None:
+        return watch(args, s)
+    if args.bench is not None:
+        return bench(args, s)
     fmt = args.format if args.format != "auto" else ("mlx" if s["os"] == "Darwin" and s["unified"] else "gguf")
     found, procs = ([], [])
     if not args.ignore_running:
