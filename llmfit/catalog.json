@@ -1,0 +1,154 @@
+{
+ "_about": "Models llmfit checks. 'query' finds the quantized build (MLX on mlx-community / lmstudio-community, GGUF on unsloth / bartowski / ...). 'base' is the official repo used for params, config and license. Add your own entries freely. Run with --discover to also see the newest releases.",
+ "models": [
+  {
+   "name": "Qwen3.8-Flash-Next",
+   "query": "Qwen3.8-Flash-Next",
+   "base": "Qwen/Qwen3.8-Flash-Next",
+   "role": "coding main"
+  },
+  {
+   "name": "Qwen3.5-122B-A10B",
+   "query": "Qwen3.5-122B-A10B",
+   "base": "Qwen/Qwen3.5-122B-A10B",
+   "role": "coding main"
+  },
+  {
+   "name": "Qwen3-Coder-Next",
+   "query": "Qwen3-Coder-Next",
+   "base": "Qwen/Qwen3-Coder-Next",
+   "role": "coding fast"
+  },
+  {
+   "name": "Qwen3.8-27B",
+   "query": "Qwen3.8-27B",
+   "base": "Qwen/Qwen3.8-27B",
+   "role": "coding rag"
+  },
+  {
+   "name": "Qwen3.6-35B-A3B",
+   "query": "Qwen3.6-35B-A3B",
+   "base": "Qwen/Qwen3.6-35B-A3B",
+   "role": "coding fast rag"
+  },
+  {
+   "name": "Qwen3.5-35B-A3B",
+   "query": "Qwen3.5-35B-A3B",
+   "base": "Qwen/Qwen3.5-35B-A3B",
+   "role": "fast rag"
+  },
+  {
+   "name": "Qwen3-Coder-30B-A3B",
+   "query": "Qwen3-Coder-30B-A3B",
+   "base": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+   "role": "coding fast"
+  },
+  {
+   "name": "MiMo-V2.6-Flash",
+   "query": "MiMo-V2.6-Flash",
+   "base": "XiaomiMiMo/MiMo-V2.6-Flash-RL",
+   "role": "coding main"
+  },
+  {
+   "name": "DeepSeek-V4-Flash",
+   "query": "DeepSeek-V4-Flash",
+   "base": "deepseek-ai/DeepSeek-V4-Flash-0731",
+   "role": "reasoning coding main",
+   "active_b": 13,
+   "params_b": 284
+  },
+  {
+   "name": "GLM-5.3-Flash",
+   "query": "GLM-5.3-Flash",
+   "base": "zai-org/GLM-5.3-Flash",
+   "role": "coding"
+  },
+  {
+   "name": "GLM-4.7-Flash",
+   "query": "GLM-4.7-Flash",
+   "base": "zai-org/GLM-4.7-Flash",
+   "role": "coding fast"
+  },
+  {
+   "name": "GLM-4.5-Air",
+   "query": "GLM-4.5-Air",
+   "base": "zai-org/GLM-4.5-Air",
+   "role": "coding"
+  },
+  {
+   "name": "MiniMax-M2.5",
+   "query": "MiniMax-M2.5",
+   "base": "MiniMaxAI/MiniMax-M2.5",
+   "role": "coding main"
+  },
+  {
+   "name": "gpt-oss-120b",
+   "query": "gpt-oss-120b",
+   "base": "openai/gpt-oss-120b",
+   "role": "reasoning rag"
+  },
+  {
+   "name": "gpt-oss-20b",
+   "query": "gpt-oss-20b",
+   "base": "openai/gpt-oss-20b",
+   "role": "reasoning fast"
+  },
+  {
+   "name": "Devstral-2-123B",
+   "query": "Devstral-2-123B",
+   "base": "mistralai/Devstral-2-123B-Instruct-2512",
+   "role": "coding main"
+  },
+  {
+   "name": "Devstral-Small-2-24B",
+   "query": "Devstral-Small-2-24B",
+   "base": null,
+   "role": "coding",
+   "params_b": 24
+  },
+  {
+   "name": "Mistral-Small-4-119B",
+   "query": "Mistral-Small-4-119B",
+   "base": "mistralai/Mistral-Small-4-119B-2603",
+   "role": "coding rag"
+  },
+  {
+   "name": "Gemma-4-31B",
+   "query": "gemma-4-31B-it",
+   "base": "google/gemma-4-31B-it",
+   "role": "rag vision"
+  },
+  {
+   "name": "Gemma-4-26B-A4B",
+   "query": "gemma-4-26B-A4B-it",
+   "base": "google/gemma-4-26B-A4B-it",
+   "role": "rag fast vision"
+  },
+  {
+   "name": "Qwen3-Embedding-8B",
+   "query": "Qwen3-Embedding-8B",
+   "base": "Qwen/Qwen3-Embedding-8B",
+   "role": "rag embed"
+  },
+  {
+   "name": "Qwen3-Reranker-4B",
+   "query": "Qwen3-Reranker-4B",
+   "base": "Qwen/Qwen3-Reranker-4B",
+   "role": "rag rerank"
+  },
+  {
+   "name": "bge-m3",
+   "query": "bge-m3",
+   "base": "BAAI/bge-m3",
+   "role": "rag embed",
+   "params_b": 0.57
+  },
+  {
+   "name": "bge-reranker-v2-m3",
+   "query": "bge-reranker-v2-m3",
+   "base": "BAAI/bge-reranker-v2-m3",
+   "role": "rag rerank",
+   "params_b": 0.57
+  }
+ ]
+}
