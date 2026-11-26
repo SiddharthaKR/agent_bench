@@ -6,6 +6,8 @@ Check which local LLMs fit your machine, all in one place. It works on **macOS (
 - **Latest model info, fetched live from Hugging Face**: real download size of the MLX (Mac) or GGUF (Linux) build, total and active params, MoE or dense, experts (active/total), layers, max context, architecture, license and last update.
 - **New releases**: adds trending models from known labs released in the last 120 days, so the list stays current without editing anything.
 - **Installed models**: scans LM Studio, Ollama, llama.cpp, the Hugging Face cache and any folder you name. It reads GGUF headers and `config.json` directly.
+- **Already-running models**: finds models loaded right now in Ollama, LM Studio, llama.cpp server or any OpenAI-compatible server (vLLM, SGLang, mlx_lm.server), plus LLM processes using GPU or RAM, and subtracts that memory from your budget. You can also check remote servers with `--endpoint`.
+- **Parallel requests**: `--parallel N` gives every model N KV caches, one per concurrent request. The HTML report has a live "parallel" box to change this.
 - **KV cache estimate** for your context length. It handles GQA, MLA (DeepSeek/GLM/Mistral 4), sliding-window and hybrid linear-attention models.
 - **Fit check**: each model is marked `FIT` / `TIGHT` / `OFFLOAD` / `NO`. You can **select several models** to see whether they fit together.
 - **One-page HTML report** with checkboxes, a live memory bar, sorting and filters.
@@ -36,11 +38,14 @@ In the picker, type `2,3 5-7` to toggle models, then `c` to clear, `w` for the w
 | Installed models only | `python3 llmfit.py --local-only --scan-dir ~/my-models` |
 | Force fresh data | `python3 llmfit.py --refresh` |
 | More trending models, any uploader | `python3 llmfit.py --trending 30 --trending-any` |
+| 4 concurrent requests per model | `python3 llmfit.py --parallel 4` |
+| Also check a remote server's loaded models | `python3 llmfit.py --endpoint http://192.168.1.126:1234` |
+| Plan as if nothing is running | `python3 llmfit.py --ignore-running` |
 | Machine-readable output | `python3 llmfit.py --json > models.json` |
 
 ## How "fits" is decided
 
-`Need = weights × 1.03 + KV cache(ctx) + 1 GB runtime overhead`, compared against your **budget**:
+`Need = weights × 1.03 + KV cache(ctx) × parallel + 1 GB runtime overhead`, compared against your **free budget** (the budget below minus memory already used by running models):
 
 | Machine | Budget |
 |---|---|
@@ -76,6 +81,18 @@ sudo sysctl iogpu.wired_limit_mb=230000   # 256 GB Mac example
 - `query`: text used to find the quantized build (MLX: mlx-community / lmstudio-community; GGUF: unsloth / bartowski / lmstudio-community / ggml-org)
 - `base`: official repo, used for params, config and license
 - optional `params_b` / `active_b` to override params with vendor numbers
+
+## Already-running models
+
+| Server | How it's detected | Size source |
+|---|---|---|
+| Ollama | `GET :11434/api/ps` | reported `size_vram` |
+| LM Studio | `GET :1234/api/v0/models` (state = loaded) | process memory |
+| llama.cpp server | `GET :8080/props` | model file size / process memory |
+| vLLM, SGLang, mlx_lm.server | `GET :8000/v1/models` | GPU process memory |
+| Anything else | `nvidia-smi` compute apps (Linux) or LLM process RSS (Mac) | measured |
+
+The larger of "reported model sizes" and "measured process memory" is subtracted, to avoid double counting. Note that vLLM reserves `gpu_memory_utilization` of the GPU up front, so its whole reservation counts as used.
 
 ## Notes
 

@@ -149,13 +149,128 @@ def print_specs(s):
     print(f"  RAM      : {gb(s['ram'])} GB" + ("  (unified)" if s["unified"] else ""))
     for g in s["gpus"]:
         print(f"  GPU      : {g['name']}  {gb(g['vram'])} GB")
-    print(f"  Budget   : {c(gb(s['budget']) + ' GB', BOLD)} for model weights + KV cache")
+    if s.get("budget_total") is not None and s.get("in_use"):
+        print(f"  Budget   : {gb(s['budget_total'])} GB total, {c(gb(s['budget']) + ' GB free now', BOLD)} "
+              f"for new models (weights + KV cache)")
+    else:
+        print(f"  Budget   : {c(gb(s['budget']) + ' GB', BOLD)} for model weights + KV cache")
     if s["offload_budget"]:
         print(f"  Offload  : {gb(s['offload_budget'])} GB if layers spill to CPU RAM (slow)")
     for n in s["notes"]:
         print(c(f"  note: {n}", DIM))
     print()
 
+
+
+# ----------------------------------------------------------------------------- running models
+DEFAULT_ENDPOINTS = ["http://127.0.0.1:11434", "http://127.0.0.1:1234", "http://127.0.0.1:8080",
+                     "http://127.0.0.1:8000"]
+PROC_HINTS = ("ollama", "llama-server", "llama-cli", "llama_server", "lm studio", "lmstudio", "lms",
+              "mlx_lm", "mlx-lm", "vllm", "sglang", "koboldcpp", "text-generation", "tabbyapi", "exllama")
+
+
+def http_json(url, timeout=1.5):
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": f"llmfit/{VERSION}"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def _find_size(obj):
+    """Best-effort: find a byte-size field in an arbitrary JSON object."""
+    if isinstance(obj, dict):
+        for k in ("size_vram", "sizeBytes", "size_bytes", "size", "memory", "vram"):
+            v = obj.get(k)
+            if isinstance(v, (int, float)) and v > 1e8:
+                return int(v)
+    return None
+
+
+def detect_running(endpoints, os_name):
+    """Models currently loaded in local (or remote) servers, plus GPU/process memory in use."""
+    found = []
+    for ep in endpoints:
+        ep = ep.rstrip("/")
+        ps = http_json(f"{ep}/api/ps")  # Ollama
+        if isinstance(ps, dict) and "models" in ps:
+            for m in ps["models"]:
+                found.append({"server": f"ollama {ep}", "model": m.get("name"),
+                              "bytes": m.get("size_vram") or m.get("size"), "ctx": m.get("context_length")})
+            continue
+        lm = http_json(f"{ep}/api/v0/models")  # LM Studio
+        if isinstance(lm, dict) and isinstance(lm.get("data"), list) and any("state" in x for x in lm["data"]):
+            for m in lm["data"]:
+                if m.get("state") == "loaded":
+                    found.append({"server": f"lmstudio {ep}", "model": m.get("id"), "bytes": _find_size(m),
+                                  "ctx": m.get("loaded_context_length") or m.get("max_context_length")})
+            continue
+        props = http_json(f"{ep}/props")  # llama.cpp server
+        if isinstance(props, dict) and ("default_generation_settings" in props or "model_path" in props):
+            dg = props.get("default_generation_settings") or {}
+            path = props.get("model_path") or dg.get("model")
+            size = None
+            if path and os.path.exists(str(path)):
+                size = os.path.getsize(path)
+            found.append({"server": f"llama.cpp {ep}", "model": Path(str(path)).name if path else "?",
+                          "bytes": size, "ctx": dg.get("n_ctx"), "slots": props.get("total_slots")})
+            continue
+        om = http_json(f"{ep}/v1/models")  # vLLM / SGLang / mlx_lm.server / any OpenAI-compatible
+        if isinstance(om, dict) and isinstance(om.get("data"), list):
+            for m in om["data"]:
+                found.append({"server": f"openai-api {ep}", "model": m.get("id"), "bytes": _find_size(m),
+                              "ctx": m.get("max_model_len")})
+    # process / GPU memory (catches anything the APIs missed, and sizes for servers that don't report it)
+    procs = []
+    if os_name == "Linux" and shutil.which("nvidia-smi"):
+        out = run(["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory",
+                   "--format=csv,noheader,nounits"])
+        for line in out.splitlines():
+            parts = [x.strip() for x in line.split(",")]
+            if len(parts) == 3 and parts[2].replace(".", "").isdigit():
+                procs.append({"pid": parts[0], "name": Path(parts[1]).name, "bytes": int(float(parts[2])) * 1024 ** 2,
+                              "kind": "GPU"})
+    else:
+        out = run(["ps", "-axo", "pid=,rss=,comm="])
+        for line in out.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[1].isdigit():
+                name = parts[2].lower()
+                if any(h in name for h in PROC_HINTS) and int(parts[1]) * 1024 > 3e8:
+                    procs.append({"pid": parts[0], "name": Path(parts[2]).name, "bytes": int(parts[1]) * 1024,
+                                  "kind": "RAM"})
+    return found, procs
+
+
+def apply_running(s, found, procs, endpoints):
+    """Subtract memory already in use by local servers from the budget."""
+    local_model_bytes = sum(f["bytes"] or 0 for f in found if any(h in f["server"] for h in ("127.0.0.1", "localhost")))
+    proc_bytes = sum(p["bytes"] for p in procs)
+    in_use = max(local_model_bytes, proc_bytes)  # avoid double counting
+    s["budget_total"] = s["budget"]
+    s["in_use"] = in_use
+    s["budget"] = max(0, s["budget"] - in_use)
+    if s.get("offload_budget"):
+        s["offload_budget"] = max(0, s["offload_budget"] - in_use)
+    return s
+
+
+def print_running(found, procs, s):
+    print(c("== Already running ==", BOLD))
+    if not found and not procs:
+        print(c("  nothing detected (checked Ollama, LM Studio, llama.cpp, OpenAI-compatible servers, GPU processes)", DIM))
+    for f in found:
+        extra = f"  ctx {fmt_ctx(f.get('ctx'))}" if f.get("ctx") else ""
+        if f.get("slots"):
+            extra += f"  slots {f['slots']}"
+        print(f"  {f['server']:<36} {str(f['model'])[:44]:<44} {gb(f['bytes']):>7} GB{extra}")
+    for p in procs:
+        print(f"  {p['kind']} pid {p['pid']:<8} {p['name'][:58]:<58} {gb(p['bytes']):>7} GB")
+    if s.get("in_use"):
+        print(f"  In use: {c(gb(s['in_use']) + ' GB', YELLOW)} -> free budget now "
+              f"{c(gb(s['budget']) + ' GB', BOLD)} (of {gb(s['budget_total'])} GB)")
+    print()
 
 # ----------------------------------------------------------------------------- HF client + cache
 class HFClient:
@@ -843,6 +958,7 @@ a{color:var(--acc);text-decoration:none}.tag{font-size:11px;border:1px solid var
 <div class="specs" id="specs"></div>
 <div class="bar"><b id="tot">Selected: 0 GB</b><div class="meter"><div id="fill"></div></div><span id="verdict" class="mut">Tick models to check a combination</span>
 <input type="search" id="q" placeholder="filter…"><select id="fit"><option value="">all</option><option>FIT</option><option>TIGHT</option><option>NO</option></select>
+<label class="mut">parallel <input type="number" id="par" min="1" max="64" value="1" style="width:56px"></label>
 <button id="clr">clear</button></div>
 <div class="wrap"><table><thead><tr id="hd"></tr></thead><tbody id="tb"></tbody></table>
 <p class="mut">Need = weights + KV cache (for the chosen context) + runtime overhead. FIT &lt; 85% of budget, TIGHT ≤ 100%. "~" active = computed from config (may include embedding tables). (est) = no prebuilt quant found; size estimated.</p></div>
@@ -850,13 +966,19 @@ a{color:var(--acc);text-decoration:none}.tag{font-size:11px;border:1px solid var
 const D=__DATA__;const GB=1073741824;const S=D.specs;
 const f1=x=>x==null?"–":(x/GB).toFixed(1);const fp=p=>!p?"?":(p>=1e10?(p/1e9).toFixed(0):(p/1e9).toFixed(1))+"B";
 const fc=n=>!n?"?":(n>=1024?Math.round(n/1024)+"K":n);
-document.getElementById("sub").textContent=`Format ${D.format.toUpperCase()} · ~${D.bits}-bit · KV for ${D.ctx.toLocaleString()} tokens @ ${D.kv_bits}-bit · +${D.overhead} GB overhead each · generated ${D.generated}`;
+document.getElementById("sub").textContent=`Format ${D.format.toUpperCase()} · ~${D.bits}-bit · KV for ${D.ctx.toLocaleString()} tokens @ ${D.kv_bits}-bit per request · +${D.overhead} GB overhead each · generated ${D.generated}`;
 const chips=[["OS",S.os+" "+S.arch],["CPU",S.cpu||"?"],["RAM",f1(S.ram)+" GB"+(S.unified?" unified":"")],...S.gpus.map(g=>["GPU",g.name+" "+f1(g.vram)+" GB"]),["Budget",f1(S.budget)+" GB"]];
 if(S.offload_budget)chips.push(["With CPU offload",f1(S.offload_budget)+" GB"]);
+if(S.in_use)chips.push(["Already in use",f1(S.in_use)+" GB (budget shown is what is free)"]);
+(S.running||[]).forEach(r=>chips.push(["Running",`${r.model} · ${r.server}${r.bytes?" · "+f1(r.bytes)+" GB":""}`]));
 document.getElementById("specs").innerHTML=chips.map(([k,v])=>`<span class="chip"><span class="mut">${k}</span> <b>${v}</b></span>`).join("")+S.notes.map(n=>`<span class="chip mut">${n}</span>`).join("");
 const cols=[["","sel"],["Model","name"],["Role","role"],["Src","kind"],["Type","type"],["Total","total"],["Active","active"],["Experts","exp"],["Layers","layers"],["Ctx","ctx"],["Quant","quant"],["Weights GB","size"],["KV GB","kv"],["Need GB","need"],["Fit","fit"],["Arch","arch"],["License","license"],["Updated","updated"]];
 D.models.forEach((r,i)=>{r.i=i;r.type=r.moe?"MoE":(r.total||r.layers?"Dense":"?");r.exp=r.experts?`${r.experts_active||"?"}/${r.experts}`:"–";});
-let sel=new Set(),sortK="need",sortD=1;
+let sel=new Set(),sortK="need",sortD=1;const P0=D.parallel||1;
+function recalc(){const P=Math.max(1,+document.getElementById("par").value||1);
+ D.models.forEach(r=>{const ks=r.kv_single!=null?r.kv_single:(r.kv!=null?r.kv/P0:null);r.kv=ks==null?null:ks*P;
+  r.need=r.size?Math.round(r.size*1.03+(r.kv||0)+D.overhead*GB):null;
+  r.fit=r.need==null?"?":r.need<=S.budget*.85?"FIT":r.need<=S.budget?"TIGHT":(S.offload_budget&&r.need<=S.offload_budget)?"OFFLOAD":"NO";});draw();}
 document.getElementById("hd").innerHTML=cols.map(([h,k])=>`<th data-k="${k}">${h}</th>`).join("");
 document.querySelectorAll("th").forEach(th=>th.onclick=()=>{const k=th.dataset.k;if(k==="sel")return;sortD=sortK===k?-sortD:1;sortK=k;draw();});
 function link(r){return r.repo&&r.repo.includes("/")&&!r.repo.startsWith("/")?`<a href="https://huggingface.co/${r.repo}" target="_blank">${r.name}</a>`:r.name}
@@ -875,7 +997,7 @@ function draw(){const q=document.getElementById("q").value.toLowerCase(),ff=docu
  const left=S.budget-tot,v=document.getElementById("verdict");
  v.className=!sel.size?"mut":pct<=85?"FIT":pct<=100?"TIGHT":"NO";
  v.textContent=!sel.size?"Tick models to check a combination":pct<=85?`Fits — ${f1(left)} GB left for context`:pct<=100?`Tight — ${f1(left)} GB left, keep context short`:`Does not fit — over by ${f1(-left)} GB`;}
-document.getElementById("q").oninput=draw;document.getElementById("fit").onchange=draw;document.getElementById("clr").onclick=()=>{sel.clear();draw();};draw();
+document.getElementById("par").value=P0;document.getElementById("par").oninput=recalc;document.getElementById("q").oninput=draw;document.getElementById("fit").onchange=draw;document.getElementById("clr").onclick=()=>{sel.clear();draw();};draw();
 </script></body></html>"""
 
 
@@ -887,6 +1009,7 @@ def write_html(path, rows, s, fmt, args):
         r["fit"] = fit_label(r["need"], s)[1]
         out.append(r)
     data = {"specs": s, "format": fmt, "bits": args.bits, "ctx": args.ctx, "kv_bits": args.kv_bits,
+            "parallel": args.parallel,
             "overhead": args.overhead, "generated": time.strftime("%Y-%m-%d %H:%M"), "models": out}
     blob = json.dumps(data, default=str).replace("</", "<\\/")
     Path(path).write_text(HTML_TMPL.replace("__DATA__", blob), encoding="utf-8")
@@ -901,6 +1024,12 @@ def main():
     ap.add_argument("--bits", type=int, default=4, choices=[2, 3, 4, 6, 8], help="quantization to look up (default 4)")
     ap.add_argument("--ctx", type=int, default=32768, help="context length for KV-cache estimate (default 32768)")
     ap.add_argument("--kv-bits", type=int, default=16, choices=[4, 8, 16], help="KV cache precision (default 16)")
+    ap.add_argument("--parallel", type=int, default=1,
+                    help="concurrent requests per model; each needs its own KV cache (default 1)")
+    ap.add_argument("--ignore-running", action="store_true",
+                    help="don't subtract models already loaded / running from the budget")
+    ap.add_argument("--endpoint", action="append", default=[],
+                    help="extra server to check for loaded models, e.g. http://192.168.1.126:1234 (repeatable)")
     ap.add_argument("--overhead", type=float, default=1.0, help="runtime overhead per model in GB (default 1.0)")
     ap.add_argument("--role", help="only catalog models with this role (coding, rag, reasoning, ...)")
     ap.add_argument("--filter", help="only models whose name contains this text")
@@ -930,10 +1059,17 @@ def main():
 
     s = override_specs(detect_specs(), args)
     fmt = args.format if args.format != "auto" else ("mlx" if s["os"] == "Darwin" and s["unified"] else "gguf")
+    found, procs = ([], [])
+    if not args.ignore_running:
+        found, procs = detect_running(DEFAULT_ENDPOINTS + args.endpoint, s["os"])
+        s = apply_running(s, found, procs, args.endpoint)
+    s["running"] = found
     if not args.json:
         print_specs(s)
+        if not args.ignore_running:
+            print_running(found, procs, s)
         print(c(f"Format: {fmt.upper()}  |  quant ~{args.bits}-bit  |  KV cache for {args.ctx:,} tokens "
-                f"@ {args.kv_bits}-bit  |  +{args.overhead} GB runtime overhead each\n", DIM))
+                f"@ {args.kv_bits}-bit x {args.parallel} parallel  |  +{args.overhead} GB runtime overhead each\n", DIM))
 
     hf = HFClient(refresh=args.refresh, offline=args.offline)
     rows = []
@@ -965,6 +1101,10 @@ def main():
         rows += loc
         if not args.json:
             print(c(f"Installed models found: {len(loc)} (scanned {len(dirs)} folders + Ollama)", DIM))
+    for r in rows:
+        if r.get("kv"):
+            r["kv_single"] = r["kv"]
+            r["kv"] = r["kv"] * max(1, args.parallel)
     if args.fits_only:
         rows = [r for r in rows if fit_label(need(r, args.overhead), s)[1] in ("FIT", "TIGHT")]
 
